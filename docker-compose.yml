@@ -1,0 +1,19 @@
+services:
+  bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - API_TOKEN=${API_TOKEN}
+    volumes:
+      - ./logs:/app/logs
+      - ./db.sqlite3:/app/db.sqlite3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+    restart: unless-stopped  # Добавили политику перезапуска
+
+volumes:
+  logs:
