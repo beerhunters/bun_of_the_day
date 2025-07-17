@@ -1,13 +1,9 @@
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
 
 # Получение переменных конфигурации
 try:
-    API_TOKEN = os.getenv("API_TOKEN")
+    API_TOKEN = os.environ["API_TOKEN"]
+    ADMIN = int(os.environ["ADMIN_ID"])
+    FOR_LOGS = int(os.environ["FOR_LOGS"])
 except (TypeError, ValueError) as ex:
     print("Error while reading config:", ex)
-
-ADMIN = 267863612
-FOR_LOGS = -1002327384497
