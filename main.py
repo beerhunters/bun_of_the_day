@@ -14,7 +14,6 @@ from handlers.exceptions import error_router
 from handlers.in_game import in_game_r
 from handlers.new_member import new_member_r
 from handlers.random_user import send_random_message
-from handlers.sausage_game import sausage_game_r
 from handlers.start import start_r
 
 from database.queries import get_active_chat_ids
@@ -47,7 +46,6 @@ async def main():
         start_r,
         new_member_r,
         in_game_r,
-        sausage_game_r,
         admin_cntr,
         admin_points_r,
         error_router,

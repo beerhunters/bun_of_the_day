@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
     environment:
       - API_TOKEN=${API_TOKEN}
+      - DB_ECHO=False
     volumes:
       - ./logs:/app/logs
       - ./db.sqlite3:/app/db.sqlite3
@@ -13,7 +14,6 @@ services:
         limits:
           cpus: '0.5'
           memory: 256M
-    restart: unless-stopped  # Добавили политику перезапуска
-
+    restart: unless-stopped
 volumes:
   logs:
