@@ -1,9 +1,31 @@
 import asyncio
+import logging
+import os
+
+# Получаем LOG_LEVEL напрямую из переменных окружения
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOG_LEVEL_MAPPING = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+    "CRITICAL": logging.CRITICAL
+}
+app_log_level = LOG_LEVEL_MAPPING.get(LOG_LEVEL, logging.INFO)
+
+# ВАЖНО: Настраиваем логирование для внешних библиотек ДО их импорта
+logging.getLogger("aiogram").setLevel(logging.WARNING)
+logging.getLogger("aiogram.event").setLevel(logging.WARNING)
+logging.getLogger("aiogram.dispatcher").setLevel(logging.WARNING)
+logging.getLogger("aiohttp").setLevel(logging.WARNING)
+logging.getLogger("aiosqlite").setLevel(logging.WARNING)
+
+# Теперь импортируем logger
+from logger import logger
 
 import aiocron
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
-
 
 from config import API_TOKEN
 from handlers.admin_cntr import admin_cntr
@@ -22,7 +44,6 @@ from handlers.start import start_r
 
 from database.queries import get_active_chat_ids
 from database.db import create_missing_tables
-from logger import logger
 
 
 async def send_daily_messages(bot: Bot):
