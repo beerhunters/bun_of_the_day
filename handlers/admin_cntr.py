@@ -21,7 +21,7 @@ from handlers.in_game import pluralize_points
 from collections import defaultdict
 
 from handlers.random_user import send_random_message
-from handlers.evening_humor import send_evening_humor
+from handlers.evening_humor import send_evening_humor, get_evening_schedule_info
 
 admin_cntr = Router()
 
@@ -160,6 +160,9 @@ async def admin_other_menu(callback: CallbackQuery):
         ],
         [
             InlineKeyboardButton(text="🌇 Отправить вечернее юморное сообщение", callback_data="cmd_send_evening_humor")
+        ],
+        [
+            InlineKeyboardButton(text="🕐 Статус расписания вечерних сообщений", callback_data="cmd_evening_schedule_status")
         ],
         [
             InlineKeyboardButton(text="⬅️ Назад в главное меню", callback_data="back_to_main")
@@ -1338,7 +1341,9 @@ async def admin_help_handler_internal(message):
         "  → Выбор чата → Ввод сообщения → Отправка\n"
         "• 🥐 Массовая отправка Булочки Дня во все чаты\n"
         "• 🌇 Отправка вечернего юморного сообщения (тест функции)\n"
-        "  → Автоматически отправляется каждый день в случайное время 17:00-21:00 МСК\n\n"
+        "  → Автоматически отправляется каждый день в случайное время 18:00-22:00 МСК\n"
+        "• 🕐 Статус расписания вечерних сообщений (диагностика)\n"
+        "  → Проверка времени, статуса планировщика, следующей отправки\n\n"
         
         "⌨️ <b>КЛАССИЧЕСКИЕ КОМАНДЫ (для экспертов):</b>\n"
         "<code>/user_list</code> - Список пользователей\n"
@@ -2189,6 +2194,74 @@ async def callback_send_evening_humor(callback: CallbackQuery):
         
         await callback.message.edit_text(
             f"❌ <b>Ошибка при отправке вечернего юмора</b>\n\n"
+            f"Детали: <code>{str(e)}</code>",
+            parse_mode="HTML",
+            reply_markup=error_keyboard
+        )
+    
+    await callback.answer()
+
+
+@admin_cntr.callback_query(F.data == "cmd_evening_schedule_status")
+async def callback_evening_schedule_status(callback: CallbackQuery):
+    """Показать статус расписания вечерних сообщений."""
+    if callback.from_user.id != ADMIN:
+        await callback.answer("❌ Доступ запрещен", show_alert=True)
+        return
+    
+    try:
+        # Получаем информацию о расписании
+        schedule_info = get_evening_schedule_info()
+        
+        # Получаем информацию о статусе cron задачи
+        from main import evening_cron_task
+        task_status = "Активна" if evening_cron_task and hasattr(evening_cron_task, 'running') else "Не активна"
+        
+        status_text = f"🕐 <b>Статус расписания вечерних сообщений</b>\n\n"
+        status_text += f"⏰ <b>Текущее время МСК:</b> {schedule_info['current_moscow_time']}\n"
+        status_text += f"🎯 <b>Рабочее окно:</b> {schedule_info['evening_window']}\n"
+        status_text += f"📍 <b>Текущий час:</b> {schedule_info['current_moscow_hour']}:xx МСК\n"
+        status_text += f"✅ <b>Подходящее время?</b> {'Да' if schedule_info['is_evening_time'] else 'Нет'}\n\n"
+        
+        status_text += f"🤖 <b>Статус планировщика:</b> {task_status}\n"
+        status_text += f"📅 <b>Следующая возможность:</b> {schedule_info['next_possible_time']}\n\n"
+        
+        if schedule_info['is_evening_time']:
+            status_text += "💡 <b>Сейчас подходящее время для отправки!</b>\n"
+            status_text += "Вы можете протестировать функцию прямо сейчас.\n\n"
+        else:
+            if schedule_info['current_moscow_hour'] < 18:
+                hours_left = 18 - schedule_info['current_moscow_hour']
+                status_text += f"⏳ <b>До начала окна:</b> {hours_left} ч.\n"
+            else:
+                hours_left = 24 - schedule_info['current_moscow_hour'] + 18
+                status_text += f"⏳ <b>До следующего окна:</b> {hours_left} ч.\n"
+        
+        status_text += "📋 <b>Справка:</b>\n"
+        status_text += "• Каждый день планируется случайное время в окне 18:00-22:00 МСК\n"
+        status_text += "• После отправки сообщения автоматически планируется следующее\n"
+        status_text += "• Планировщик должен быть всегда активен"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🌇 Тест отправки", callback_data="cmd_send_evening_humor")],
+            [InlineKeyboardButton(text="🔄 Обновить статус", callback_data="cmd_evening_schedule_status")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_other")]
+        ])
+        
+        await callback.message.edit_text(
+            status_text,
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+        
+    except Exception as e:
+        error_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="cmd_evening_schedule_status")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_other")]
+        ])
+        
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка при получении статуса</b>\n\n"
             f"Детали: <code>{str(e)}</code>",
             parse_mode="HTML",
             reply_markup=error_keyboard

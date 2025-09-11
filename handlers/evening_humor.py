@@ -78,15 +78,15 @@ def get_moscow_hour() -> int:
 
 
 def is_evening_time() -> bool:
-    """Проверить, подходящее ли время для вечерних сообщений (17:00-21:00 МСК)."""
+    """Проверить, подходящее ли время для вечерних сообщений (18:00-22:00 МСК)."""
     hour = get_moscow_hour()
-    return 17 <= hour <= 21
+    return 18 <= hour <= 22
 
 
 def get_random_evening_cron() -> str:
-    """Получить случайное время в формате cron для вечерних сообщений (17:00-21:00 МСК)."""
-    # Случайный час от 17 до 21
-    hour = random.randint(17, 21)
+    """Получить случайное время в формате cron для вечерних сообщений (18:00-22:00 МСК)."""
+    # Случайный час от 18 до 22
+    hour = random.randint(18, 22)
     # Случайная минута от 0 до 59
     minute = random.randint(0, 59)
     
@@ -97,4 +97,25 @@ def get_random_evening_cron() -> str:
         utc_hour += 24
     
     # Формат: минута час * * * (каждый день в указанное время)
-    return f"{minute} {utc_hour} * * *"
+    cron_schedule = f"{minute} {utc_hour} * * *"
+    
+    # Логируем информацию о планировании
+    logger.info(f"Запланировано вечернее сообщение на {hour:02d}:{minute:02d} МСК (UTC: {utc_hour:02d}:{minute:02d}) - cron: {cron_schedule}")
+    
+    return cron_schedule
+
+
+def get_evening_schedule_info() -> dict:
+    """Получить информацию о текущем расписании вечерних сообщений."""
+    moscow_hour = get_moscow_hour()
+    from datetime import timezone, timedelta
+    moscow_tz = timezone(timedelta(hours=3))
+    moscow_time = datetime.now(moscow_tz)
+    
+    return {
+        "current_moscow_time": moscow_time.strftime("%H:%M:%S"),
+        "current_moscow_hour": moscow_hour,
+        "is_evening_time": is_evening_time(),
+        "evening_window": "18:00-22:00 МСК",
+        "next_possible_time": "Сегодня" if moscow_hour < 22 else "Завтра"
+    }

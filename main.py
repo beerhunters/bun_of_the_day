@@ -13,7 +13,7 @@ from handlers.exceptions import error_router
 from handlers.in_game import in_game_r
 from handlers.new_member import new_member_r
 from handlers.random_user import send_random_message
-from handlers.evening_humor import send_evening_humor, get_random_evening_cron
+from handlers.evening_humor import send_evening_humor, get_random_evening_cron, get_evening_schedule_info
 from handlers.start import start_r
 
 from database.queries import get_active_chat_ids
@@ -48,12 +48,17 @@ async def schedule_random_evening_message(bot: Bot):
     global evening_cron_task
     
     try:
+        # Получаем информацию о текущем времени
+        schedule_info = get_evening_schedule_info()
+        logger.info(f"Планирование вечерних сообщений - текущее время МСК: {schedule_info['current_moscow_time']}")
+        
         # Получаем случайное время для следующего вечернего сообщения
         cron_time = get_random_evening_cron()
         
         # Останавливаем предыдущую задачу, если она была
         if evening_cron_task:
             evening_cron_task.stop()
+            logger.info("Предыдущая задача вечерних сообщений остановлена")
         
         # Создаем новую задачу на случайное время
         evening_cron_task = aiocron.crontab(
@@ -62,7 +67,9 @@ async def schedule_random_evening_message(bot: Bot):
             start=True
         )
         
-        logger.info(f"Вечернее сообщение запланировано на {cron_time} (UTC)")
+        # Сразу стартуем задачу
+        evening_cron_task.start()
+        logger.info(f"✅ Задача вечерних сообщений создана и запущена: {cron_time}")
         
     except Exception as e:
         logger.error(f"Ошибка при планировании вечернего сообщения: {e}")
@@ -71,14 +78,23 @@ async def schedule_random_evening_message(bot: Bot):
 async def send_evening_and_reschedule(bot: Bot):
     """Отправка вечернего сообщения и планирование следующего."""
     try:
+        logger.info("🌇 Начинается отправка вечернего юморного сообщения...")
+        
         # Отправляем вечернее сообщение
         await send_evening_humor(bot)
+        logger.info("✅ Вечернее сообщение отправлено успешно")
         
         # Планируем следующее сообщение на завтра
+        logger.info("🔄 Планируем следующее вечернее сообщение на завтра...")
         await schedule_random_evening_message(bot)
         
     except Exception as e:
         logger.error(f"Ошибка при отправке и перепланировании вечернего сообщения: {e}")
+        # Попробуем перепланировать хотя бы следующее сообщение
+        try:
+            await schedule_random_evening_message(bot)
+        except Exception as reschedule_error:
+            logger.error(f"Критическая ошибка: не удалось перепланировать вечернее сообщение: {reschedule_error}")
 
 
 async def main():
