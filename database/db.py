@@ -39,7 +39,8 @@ async def create_missing_tables():
             await conn.run_sync(create_table)
             logger.info("✅ Таблица 'daily_selections' создана успешно")
         else:
-            logger.info("ℹ️ Таблица 'daily_selections' уже существует")
+            # logger.info("ℹ️ Таблица 'daily_selections' уже существует")
+            pass
 
 
 def with_session(func):

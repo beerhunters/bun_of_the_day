@@ -105,7 +105,21 @@ def get_logger(name: str = "bun_bot"):
     return logging.getLogger(name)
 
 
+# Настройка уровня логирования для внешних библиотек
+# Отключаем INFO логи от aiogram если уровень ERROR или выше
+if app_log_level >= logging.ERROR:
+    logging.getLogger("aiogram").setLevel(logging.WARNING)
+    logging.getLogger("aiogram.event").setLevel(logging.WARNING)
+    logging.getLogger("aiogram.dispatcher").setLevel(logging.WARNING)
+    logging.getLogger("aiohttp").setLevel(logging.WARNING)
+    logging.getLogger("aiosqlite").setLevel(logging.WARNING)
+elif app_log_level >= logging.WARNING:
+    logging.getLogger("aiogram").setLevel(logging.WARNING)
+    logging.getLogger("aiogram.event").setLevel(logging.WARNING)
+    logging.getLogger("aiohttp").setLevel(logging.WARNING)
+
 # Логгируем информацию о текущих настройках при инициализации
 logger.info(f"Logging initialized with level: {LOG_LEVEL} (numeric: {app_log_level})")
 logger.info(f"Console output level: {logging.getLevelName(console_handler.level)}")
 logger.info(f"File output level: {logging.getLevelName(file_handler.level)}")
+logger.info("External libraries logging levels adjusted")
