@@ -85,13 +85,59 @@ def is_evening_time() -> bool:
 
 def get_random_evening_cron() -> str:
     """Получить случайное время в формате cron для вечерних сообщений (18:00-22:00 МСК)."""
-    # Случайный час от 18 до 22
-    hour = random.randint(18, 22)
-    # Случайная минута от 0 до 59
-    minute = random.randint(0, 59)
+    from datetime import timezone, timedelta, datetime
+    
+    # Получаем текущее московское время
+    moscow_tz = timezone(timedelta(hours=3))
+    moscow_now = datetime.now(moscow_tz)
+    current_hour = moscow_now.hour
+    current_minute = moscow_now.minute
+    
+    # Определяем диапазон времени для планирования
+    if current_hour < 18:
+        # Еще рано для вечерних сообщений - планируем на сегодня
+        min_hour = 18
+        max_hour = 22
+        target_day = "сегодня"
+    elif current_hour <= 22:
+        # Сейчас вечернее время - планируем оставшееся время сегодня или завтра
+        if current_hour == 22 and current_minute > 30:
+            # Слишком поздно для сегодня, планируем на завтра
+            min_hour = 18
+            max_hour = 22
+            target_day = "завтра"
+        else:
+            # Можем еще запланировать на сегодня, но только на будущее время
+            min_hour = current_hour if current_minute < 30 else current_hour + 1
+            max_hour = 22
+            target_day = "сегодня"
+            
+            # Если остается мало времени, планируем на завтра
+            if min_hour > max_hour:
+                min_hour = 18
+                max_hour = 22
+                target_day = "завтра"
+    else:
+        # Поздно - планируем на завтра
+        min_hour = 18
+        max_hour = 22
+        target_day = "завтра"
+    
+    # Случайный час в диапазоне
+    hour = random.randint(min_hour, max_hour)
+    
+    # Случайная минута от 0 до 59, но если это текущий час - то минимум на 10 минут вперед
+    if target_day == "сегодня" and hour == current_hour:
+        min_minute = current_minute + 10
+        if min_minute >= 60:
+            # Переходим на следующий час
+            hour = min(hour + 1, 22)
+            min_minute = 0
+        minute = random.randint(min_minute, 59)
+    else:
+        minute = random.randint(0, 59)
     
     # Учитываем, что сервер работает в UTC, а нам нужно МСК (UTC+3)
-    # Поэтому от московского времени отнимаем 3 часа для UTC
     utc_hour = hour - 3
     if utc_hour < 0:
         utc_hour += 24
@@ -100,7 +146,7 @@ def get_random_evening_cron() -> str:
     cron_schedule = f"{minute} {utc_hour} * * *"
     
     # Логируем информацию о планировании
-    logger.info(f"Запланировано вечернее сообщение на {hour:02d}:{minute:02d} МСК (UTC: {utc_hour:02d}:{minute:02d}) - cron: {cron_schedule}")
+    logger.info(f"Запланировано вечернее сообщение на {hour:02d}:{minute:02d} МСК ({target_day}) - UTC: {utc_hour:02d}:{minute:02d} - cron: {cron_schedule}")
     
     return cron_schedule
 
