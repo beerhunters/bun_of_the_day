@@ -137,16 +137,12 @@ def get_random_evening_cron() -> str:
     else:
         minute = random.randint(0, 59)
     
-    # Учитываем, что сервер работает в UTC, а нам нужно МСК (UTC+3)
-    utc_hour = hour - 3
-    if utc_hour < 0:
-        utc_hour += 24
-    
+    # aiocron работает по московскому времени, конвертация не нужна
     # Формат: минута час * * * (каждый день в указанное время)
-    cron_schedule = f"{minute} {utc_hour} * * *"
+    cron_schedule = f"{minute} {hour} * * *"
     
     # Логируем информацию о планировании
-    logger.info(f"Запланировано вечернее сообщение на {hour:02d}:{minute:02d} МСК ({target_day}) - UTC: {utc_hour:02d}:{minute:02d} - cron: {cron_schedule}")
+    logger.info(f"Запланировано вечернее сообщение на {hour:02d}:{minute:02d} МСК ({target_day}) - cron: {cron_schedule}")
     
     return cron_schedule
 

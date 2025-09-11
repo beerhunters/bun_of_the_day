@@ -39,8 +39,9 @@ async def send_daily_messages(bot: Bot):
         logger.error(f"Ошибка при получении активных чатов: {e}")
 
 
-# Глобальная переменная для хранения текущей задачи вечерних сообщений
+# Глобальные переменные для хранения задач планировщиков
 evening_cron_task = None
+morning_cron_task = None
 
 
 async def schedule_random_evening_message(bot: Bot):
@@ -127,7 +128,8 @@ async def main():
     await bot.set_my_commands(bot_commands)
     try:
         try:
-            # Запускаем задачу отправки сообщений каждое утро в 9:00
+            # Запускаем задачу отправки сообщений каждое утро в 9:00 МСК
+            global morning_cron_task
             morning_cron_task = aiocron.crontab(
                 "0 9 * * *",
                 func=lambda: asyncio.create_task(send_daily_messages(bot)),

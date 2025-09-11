@@ -204,6 +204,10 @@ async def admin_other_menu(callback: CallbackQuery):
                 InlineKeyboardButton(
                     text="🕐 Статус расписания вечерних сообщений",
                     callback_data="cmd_evening_schedule_status",
+                ),
+                InlineKeyboardButton(
+                    text="🌅 Статус утренних сообщений",
+                    callback_data="cmd_morning_schedule_status",
                 )
             ],
             [
@@ -3143,4 +3147,115 @@ async def callback_points_cancel(callback: CallbackQuery):
             ]
         ),
     )
+    await callback.answer()
+
+
+@admin_cntr.callback_query(F.data == "cmd_morning_schedule_status")
+async def callback_morning_schedule_status(callback: CallbackQuery):
+    """Показать статус расписания утренних сообщений."""
+    if callback.from_user.id != ADMIN:
+        await callback.answer("❌ Доступ запрещен", show_alert=True)
+        return
+
+    try:
+        from handlers.evening_humor import get_moscow_hour
+        from datetime import timezone, timedelta, datetime
+        
+        # Получаем текущее московское время
+        moscow_tz = timezone(timedelta(hours=3))
+        moscow_now = datetime.now(moscow_tz)
+        current_time = moscow_now.strftime("%H:%M:%S")
+        current_hour = moscow_now.hour
+
+        # Получаем информацию о статусе утреннего планировщика
+        try:
+            from main import morning_cron_task
+            
+            if morning_cron_task is not None:
+                # Проверяем различные атрибуты aiocron задачи
+                if hasattr(morning_cron_task, 'spec') and morning_cron_task.spec:
+                    task_status = "Активна"
+                    next_run_info = f" (cron: {morning_cron_task.spec})"
+                elif hasattr(morning_cron_task, '_spec') and morning_cron_task._spec:
+                    task_status = "Активна" 
+                    next_run_info = f" (cron: {morning_cron_task._spec})"
+                elif hasattr(morning_cron_task, 'crontab') and morning_cron_task.crontab:
+                    task_status = "Активна"
+                    next_run_info = f" (расписание: {morning_cron_task.crontab})"
+                else:
+                    # Задача существует, но не можем получить расписание
+                    task_status = "Активна"
+                    next_run_info = " (расписание скрыто)"
+            else:
+                task_status = "Не активна"
+                next_run_info = ""
+        except (ImportError, AttributeError, NameError) as e:
+            task_status = "Недоступно"
+            next_run_info = f" (ошибка: {str(e)})"
+
+        # Формируем текст статуса
+        status_text = f"🌅 <b>Статус расписания утренних сообщений</b>\n\n"
+        status_text += f"⏰ <b>Текущее время МСК:</b> {current_time}\n"
+        status_text += f"📍 <b>Текущий час:</b> {current_hour}:xx МСК\n"
+        status_text += f"🕘 <b>Время отправки:</b> каждый день в 09:00 МСК\n"
+        status_text += f"🤖 <b>Статус планировщика:</b> {task_status}{next_run_info}\n\n"
+
+        # Подсчитываем время до следующей отправки
+        if current_hour < 9:
+            hours_left = 9 - current_hour
+            status_text += f"⏳ <b>До следующей отправки:</b> {hours_left} ч.\n"
+            status_text += "💡 <b>Следующая отправка:</b> сегодня в 09:00 МСК\n"
+        elif current_hour == 9:
+            status_text += "💡 <b>Сейчас время утренней отправки!</b>\n"
+        else:
+            hours_left = 24 - current_hour + 9
+            status_text += f"⏳ <b>До следующей отправки:</b> {hours_left} ч.\n"
+            status_text += "💡 <b>Следующая отправка:</b> завтра в 09:00 МСК\n"
+
+        status_text += "\n📋 <b>Справка:</b>\n"
+        status_text += "• Утренние сообщения отправляются строго в 09:00 МСК каждый день\n"
+        status_text += "• Планировщик должен быть всегда активен\n"
+        status_text += "• Содержат случайные сообщения для активных чатов"
+
+        # Кнопки управления
+        keyboard_buttons = [
+            [
+                InlineKeyboardButton(
+                    text="🌅 Тест отправки", callback_data="cmd_send_morning_message"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🔄 Обновить статус",
+                    callback_data="cmd_morning_schedule_status",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⬅️ Назад к расписаниям", callback_data="cmd_schedules"
+                )
+            ],
+        ]
+
+        await callback.message.edit_text(
+            status_text, 
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        )
+
+    except Exception as e:
+        await callback.message.edit_text(
+            f"❌ Ошибка при получении статуса утренних сообщений:\n<code>{e}</code>",
+            parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text="⬅️ Назад", callback_data="cmd_schedules"
+                        )
+                    ]
+                ]
+            ),
+        )
+
     await callback.answer()
