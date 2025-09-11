@@ -61,3 +61,21 @@ class GameSetting(Base):
     key = Column(String(50), unique=True, nullable=False)  # Ограничение длины работает
     value = Column(Integer, nullable=False)
     description = Column(Text)
+
+
+class DailySelection(Base):
+    """Модель для отслеживания ежедневного выбора Булочки Дня."""
+    
+    __tablename__ = "daily_selections"
+
+    id = Column(Integer, primary_key=True, index=True)
+    chat_id = Column(Integer, nullable=False)  # Чат, где был выбор
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)  # Выбранный пользователь
+    selection_date = Column(String, nullable=False)  # Дата в формате YYYY-MM-DD
+    bun_name = Column(String, nullable=False)  # Какая булочка была выбрана
+    
+    user = relationship("User", backref="daily_selections")  # Связь с пользователем
+    
+    __table_args__ = (
+        UniqueConstraint("chat_id", "selection_date", name="unique_chat_date_selection"),
+    )

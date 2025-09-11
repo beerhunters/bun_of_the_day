@@ -2,8 +2,9 @@ from sqlalchemy import func, select, delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from database.db import with_session
-from database.models import User, UserBun, Bun, GameSetting
+from database.models import User, UserBun, Bun, GameSetting, DailySelection
 import random
+from datetime import datetime, timedelta
 
 from logger import logger
 
@@ -70,8 +71,126 @@ async def set_user_out_of_game(session: AsyncSession, telegram_id: int, chat_id:
 
 
 @with_session
+async def get_fair_random_user(session: AsyncSession, chat_id: int):
+    """Получение справедливо случайного пользователя из чата с учетом истории."""
+    # Получаем всех активных пользователей чата
+    result = await session.execute(
+        select(User).where(User.chat_id == chat_id, User.in_game == True)
+    )
+    users = result.scalars().all()
+    
+    if not users:
+        return None
+    
+    if len(users) == 1:
+        return users[0]
+    
+    today = datetime.now().strftime("%Y-%m-%d")
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    
+    # Получаем пользователя, который был выбран вчера
+    yesterday_result = await session.execute(
+        select(DailySelection.user_id).where(
+            DailySelection.chat_id == chat_id,
+            DailySelection.selection_date == yesterday
+        )
+    )
+    yesterday_user_id = yesterday_result.scalar()
+    
+    # Получаем историю выборов для всех пользователей в этом чате
+    history_result = await session.execute(
+        select(
+            DailySelection.user_id,
+            func.max(DailySelection.selection_date).label("last_selected")
+        ).where(
+            DailySelection.chat_id == chat_id
+        ).group_by(DailySelection.user_id)
+    )
+    selection_history = {user_id: last_date for user_id, last_date in history_result.fetchall()}
+    
+    # Формируем список кандидатов с весами
+    candidates = []
+    for user in users:
+        # Пропускаем пользователя, который был выбран вчера (если есть альтернативы)
+        if len(users) > 1 and user.id == yesterday_user_id:
+            continue
+            
+        # Рассчитываем вес на основе времени последнего выбора
+        if user.id in selection_history:
+            last_selected_date = selection_history[user.id]
+            days_since_selected = (datetime.now() - datetime.strptime(last_selected_date, "%Y-%m-%d")).days
+            # Чем больше дней прошло, тем больше вес (минимум 1)
+            weight = max(1, days_since_selected)
+        else:
+            # Пользователь никогда не был выбран - максимальный приоритет
+            weight = 999
+            
+        candidates.append((user, weight))
+    
+    # Если все пользователи кроме вчерашнего отфильтровались, берем всех
+    if not candidates:
+        candidates = [(user, 1) for user in users]
+    
+    # Взвешенный случайный выбор
+    users_list = [user for user, weight in candidates]
+    weights = [weight for user, weight in candidates]
+    
+    selected_user = random.choices(users_list, weights=weights, k=1)[0]
+    
+    logger.info(f"Выбран пользователь {selected_user.full_name} (ID: {selected_user.id}) в чате {chat_id}")
+    logger.debug(f"Кандидаты и веса: {[(u.full_name, w) for u, w in candidates]}")
+    
+    return selected_user
+
+
+@with_session  
+async def save_daily_selection(session: AsyncSession, chat_id: int, user_id: int, bun_name: str):
+    """Сохранение информации о ежедневном выборе."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    
+    try:
+        # Проверяем, есть ли уже запись за сегодня для этого чата
+        existing_result = await session.execute(
+            select(DailySelection).where(
+                DailySelection.chat_id == chat_id,
+                DailySelection.selection_date == today
+            )
+        )
+        existing_selection = existing_result.scalar_one_or_none()
+        
+        if existing_selection:
+            # Обновляем существующую запись
+            existing_selection.user_id = user_id
+            existing_selection.bun_name = bun_name
+            logger.debug(f"Обновлена запись о выборе для чата {chat_id} на {today}")
+        else:
+            # Создаем новую запись
+            daily_selection = DailySelection(
+                chat_id=chat_id,
+                user_id=user_id,
+                selection_date=today,
+                bun_name=bun_name
+            )
+            session.add(daily_selection)
+            logger.info(f"Сохранен выбор Булочки Дня для чата {chat_id} на {today}")
+            
+        await session.commit()
+        
+    except IntegrityError as e:
+        await session.rollback()
+        logger.error(f"Ошибка при сохранении выбора дня для чата {chat_id}: {e}")
+        raise
+    except Exception as e:
+        await session.rollback()
+        logger.error(f"Неизвестная ошибка при сохранении выбора дня: {e}")
+        raise
+
+
+# Оставляем старую функцию для совместимости, но помечаем как deprecated
+@with_session
 async def get_random_user(session: AsyncSession, chat_id: int):
-    """Получение случайного пользователя из чата."""
+    """Получение случайного пользователя из чата (deprecated, используйте get_fair_random_user)."""
+    logger.warning("Использование deprecated функции get_random_user, рекомендуется get_fair_random_user")
     result = await session.execute(
         select(User).where(User.chat_id == chat_id, User.in_game == True)
     )
@@ -456,3 +575,56 @@ async def reset_user_on_zero_points(
 ):
     """Полное удаление булок пользователя при достижении 0 баллов."""
     await delete_user_buns(telegram_id, chat_id)  # Теперь передаем session
+
+
+@with_session
+async def delete_user_completely(session: AsyncSession, telegram_id: int, chat_id: int):
+    """Полное удаление пользователя из всех таблиц базы данных."""
+    try:
+        # Получаем пользователя для получения его внутреннего ID
+        user_result = await session.execute(
+            select(User).where(User.telegram_id == telegram_id, User.chat_id == chat_id)
+        )
+        user = user_result.scalar_one_or_none()
+        
+        if not user:
+            logger.warning(f"Пользователь telegram_id={telegram_id} не найден в чате {chat_id}")
+            return False
+        
+        user_id = user.id
+        display_name = f"@{user.username}" if user.username else user.full_name
+        
+        # 1. Удаляем все булочки пользователя
+        await session.execute(
+            delete(UserBun).where(
+                UserBun.user_id == user_id, 
+                UserBun.chat_id == chat_id
+            )
+        )
+        logger.debug(f"Удалены все булочки для пользователя {display_name}")
+        
+        # 2. Удаляем все записи о ежедневном выборе
+        await session.execute(
+            delete(DailySelection).where(
+                DailySelection.user_id == user_id,
+                DailySelection.chat_id == chat_id
+            )
+        )
+        logger.debug(f"Удалены все записи ежедневного выбора для пользователя {display_name}")
+        
+        # 3. Удаляем самого пользователя
+        await session.execute(
+            delete(User).where(
+                User.telegram_id == telegram_id,
+                User.chat_id == chat_id
+            )
+        )
+        logger.info(f"Полностью удален пользователь {display_name} (ID: {telegram_id}) из чата {chat_id}")
+        
+        await session.commit()
+        return True
+        
+    except Exception as e:
+        await session.rollback()
+        logger.error(f"Ошибка при полном удалении пользователя {telegram_id} из чата {chat_id}: {e}")
+        raise

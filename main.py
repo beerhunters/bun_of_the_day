@@ -13,9 +13,11 @@ from handlers.exceptions import error_router
 from handlers.in_game import in_game_r
 from handlers.new_member import new_member_r
 from handlers.random_user import send_random_message
+from handlers.evening_humor import send_evening_humor, get_random_evening_cron
 from handlers.start import start_r
 
 from database.queries import get_active_chat_ids
+from database.db import create_missing_tables
 from logger import logger
 
 
@@ -37,8 +39,59 @@ async def send_daily_messages(bot: Bot):
         logger.error(f"Ошибка при получении активных чатов: {e}")
 
 
+# Глобальная переменная для хранения текущей задачи вечерних сообщений
+evening_cron_task = None
+
+
+async def schedule_random_evening_message(bot: Bot):
+    """Планирование отправки вечернего сообщения на случайное время."""
+    global evening_cron_task
+    
+    try:
+        # Получаем случайное время для следующего вечернего сообщения
+        cron_time = get_random_evening_cron()
+        
+        # Останавливаем предыдущую задачу, если она была
+        if evening_cron_task:
+            evening_cron_task.stop()
+        
+        # Создаем новую задачу на случайное время
+        evening_cron_task = aiocron.crontab(
+            cron_time,
+            func=lambda: asyncio.create_task(send_evening_and_reschedule(bot)),
+            start=True
+        )
+        
+        logger.info(f"Вечернее сообщение запланировано на {cron_time} (UTC)")
+        
+    except Exception as e:
+        logger.error(f"Ошибка при планировании вечернего сообщения: {e}")
+
+
+async def send_evening_and_reschedule(bot: Bot):
+    """Отправка вечернего сообщения и планирование следующего."""
+    try:
+        # Отправляем вечернее сообщение
+        await send_evening_humor(bot)
+        
+        # Планируем следующее сообщение на завтра
+        await schedule_random_evening_message(bot)
+        
+    except Exception as e:
+        logger.error(f"Ошибка при отправке и перепланировании вечернего сообщения: {e}")
+
+
 async def main():
     """Главная функция для запуска бота."""
+    
+    # Создаем недостающие таблицы перед запуском бота
+    logger.info("Проверка и создание недостающих таблиц...")
+    try:
+        await create_missing_tables()
+    except Exception as e:
+        logger.error(f"Ошибка при создании таблиц: {e}")
+        return
+    
     bot = Bot(token=API_TOKEN)
     dp = Dispatcher()
     dp.include_routers(
@@ -59,15 +112,20 @@ async def main():
     try:
         try:
             # Запускаем задачу отправки сообщений каждое утро в 9:00
-            cron_task = aiocron.crontab(
+            morning_cron_task = aiocron.crontab(
                 "0 9 * * *",
                 func=lambda: asyncio.create_task(send_daily_messages(bot)),
                 start=True,  # Запускаем сразу
             )
-            cron_task.start()
+            morning_cron_task.start()
             logger.info("Задача отправки утренних сообщений запущена...")
+            
+            # Запускаем планировщик вечерних юморных сообщений
+            await schedule_random_evening_message(bot)
+            logger.info("Планировщик вечерних юморных сообщений запущен...")
+            
         except Exception as e:
-            logger.error(f"Ошибка при запуске задачи: {e}")
+            logger.error(f"Ошибка при запуске задач: {e}")
         logger.info("Бот запущен...")
         await dp.start_polling(bot)
     except Exception as e:

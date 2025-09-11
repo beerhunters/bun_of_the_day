@@ -2,7 +2,7 @@
 import asyncio
 import random
 from aiogram import Bot
-from database.queries import get_random_user, add_or_update_user_bun, get_all_buns
+from database.queries import get_fair_random_user, add_or_update_user_bun, get_all_buns, save_daily_selection
 from logger import logger
 
 
@@ -34,8 +34,8 @@ SHURSHU_MESSAGES = [
 
 
 async def send_random_message(bot: Bot, chat_id: int):
-    """Отправка интерактивного сообщения с выбором случайной булочки."""
-    user = await get_random_user(chat_id=chat_id)
+    """Отправка интерактивного сообщения с выбором справедливо случайной булочки."""
+    user = await get_fair_random_user(chat_id=chat_id)
     if not user:
         await bot.send_message(chat_id, "В этом чате нет активных игроков! 😔")
         logger.warning(f"Нет активных пользователей в чате {chat_id}")
@@ -72,12 +72,17 @@ async def send_random_message(bot: Bot, chat_id: int):
     bun, points_per_bun = random.choice(list(buns_points.items()))
     final_message = random.choice(MESSAGES).format(user=display_name, bun=bun)
     await msg.edit_text(
-        f"{final_message}\n\nОчков за булочку: <b>{points_per_bun}</b> 🍰",
+        final_message,
         parse_mode="HTML",
     )
 
     try:
+        # Сохраняем булочку пользователю
         await add_or_update_user_bun(user_id=user.id, bun=bun, chat_id=chat_id)
+        
+        # Сохраняем информацию о ежедневном выборе для справедливого алгоритма
+        await save_daily_selection(chat_id=chat_id, user_id=user.id, bun_name=bun)
+        
         logger.info(f"Булочка {bun} добавлена для {display_name} в чате {chat_id}")
     except Exception as e:
         logger.error(
