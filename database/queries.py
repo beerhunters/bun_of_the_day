@@ -628,3 +628,119 @@ async def delete_user_completely(session: AsyncSession, telegram_id: int, chat_i
         await session.rollback()
         logger.error(f"Ошибка при полном удалении пользователя {telegram_id} из чата {chat_id}: {e}")
         raise
+
+
+@with_session
+async def get_inactive_users_count(session: AsyncSession):
+    """Получение количества неактивных пользователей (не в игре)."""
+    try:
+        result = await session.execute(
+            select(func.count(User.id)).where(User.in_game == False)
+        )
+        count = result.scalar()
+        return count
+    except Exception as e:
+        logger.error(f"Ошибка при подсчете неактивных пользователей: {e}")
+        return 0
+
+
+@with_session
+async def get_inactive_users_by_chat(session: AsyncSession):
+    """Получение неактивных пользователей, сгруппированных по чатам."""
+    try:
+        result = await session.execute(
+            select(User).where(User.in_game == False).order_by(User.chat_id, User.telegram_id)
+        )
+        inactive_users = result.scalars().all()
+        
+        # Группируем по чатам
+        users_by_chat = {}
+        for user in inactive_users:
+            if user.chat_id not in users_by_chat:
+                users_by_chat[user.chat_id] = []
+            users_by_chat[user.chat_id].append({
+                "id": user.id,
+                "telegram_id": user.telegram_id,
+                "username": user.username,
+                "full_name": user.full_name,
+                "chat_id": user.chat_id
+            })
+        
+        return users_by_chat
+    except Exception as e:
+        logger.error(f"Ошибка при получении неактивных пользователей: {e}")
+        return {}
+
+
+@with_session
+async def bulk_delete_inactive_users(session: AsyncSession):
+    """Массовое удаление всех неактивных пользователей из всех таблиц."""
+    try:
+        # Получаем всех неактивных пользователей
+        result = await session.execute(
+            select(User).where(User.in_game == False)
+        )
+        inactive_users = result.scalars().all()
+        
+        if not inactive_users:
+            logger.info("Нет неактивных пользователей для удаления")
+            return 0, {}
+        
+        deleted_count = 0
+        deleted_by_chat = {}
+        
+        for user in inactive_users:
+            user_id = user.id
+            chat_id = user.chat_id
+            telegram_id = user.telegram_id
+            display_name = f"@{user.username}" if user.username else user.full_name
+            
+            try:
+                # 1. Удаляем все булочки пользователя
+                await session.execute(
+                    delete(UserBun).where(
+                        UserBun.user_id == user_id,
+                        UserBun.chat_id == chat_id
+                    )
+                )
+                
+                # 2. Удаляем все записи о ежедневном выборе
+                await session.execute(
+                    delete(DailySelection).where(
+                        DailySelection.user_id == user_id,
+                        DailySelection.chat_id == chat_id
+                    )
+                )
+                
+                # 3. Удаляем самого пользователя
+                await session.execute(
+                    delete(User).where(
+                        User.id == user_id,
+                        User.chat_id == chat_id
+                    )
+                )
+                
+                # Добавляем в статистику
+                if chat_id not in deleted_by_chat:
+                    deleted_by_chat[chat_id] = []
+                deleted_by_chat[chat_id].append({
+                    "telegram_id": telegram_id,
+                    "display_name": display_name
+                })
+                
+                deleted_count += 1
+                logger.debug(f"Удален неактивный пользователь {display_name} из чата {chat_id}")
+                
+            except Exception as user_error:
+                logger.error(f"Ошибка при удалении пользователя {display_name}: {user_error}")
+                continue
+        
+        await session.commit()
+        logger.info(f"Массовое удаление завершено: удалено {deleted_count} неактивных пользователей")
+        
+        return deleted_count, deleted_by_chat
+        
+    except Exception as e:
+        await session.rollback()
+        logger.error(f"Ошибка при массовом удалении неактивных пользователей: {e}")
+        raise

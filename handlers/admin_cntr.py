@@ -13,6 +13,9 @@ from database.queries import (
     remove_bun,
     edit_bun,
     add_bun,
+    get_inactive_users_count,
+    get_inactive_users_by_chat,
+    bulk_delete_inactive_users,
 )
 from handlers.in_game import pluralize_points
 from collections import defaultdict
@@ -63,6 +66,9 @@ async def admin_users_menu(callback: CallbackQuery):
         ],
         [
             InlineKeyboardButton(text="🗑 Полностью удалить пользователя", callback_data="cmd_remove_from_game")
+        ],
+        [
+            InlineKeyboardButton(text="🧹 Удалить всех неактивных игроков", callback_data="cmd_cleanup_inactive_users")
         ],
         [
             InlineKeyboardButton(text="⬅️ Назад в главное меню", callback_data="back_to_main")
@@ -1304,7 +1310,9 @@ async def admin_help_handler_internal(message):
         "<b>👥 Управление пользователями:</b>\n"
         "• 📋 Просмотр списка всех пользователей по чатам\n"
         "• 🗑 Полное удаление пользователя из БД (интерактивно)\n"
-        "  → Выбор чата → Выбор пользователя → Подтверждение\n\n"
+        "  → Выбор чата → Выбор пользователя → Подтверждение\n"
+        "• 🧹 Массовое удаление всех неактивных игроков (новое!)\n"
+        "  → Статистика → Подробный список → Подтверждение → Очистка БД\n\n"
         
         "<b>🥐 Управление булочками:</b>\n"
         "• 📋 Просмотр списка всех булочек с баллами\n"
@@ -2181,6 +2189,233 @@ async def callback_send_evening_humor(callback: CallbackQuery):
         
         await callback.message.edit_text(
             f"❌ <b>Ошибка при отправке вечернего юмора</b>\n\n"
+            f"Детали: <code>{str(e)}</code>",
+            parse_mode="HTML",
+            reply_markup=error_keyboard
+        )
+    
+    await callback.answer()
+
+
+@admin_cntr.callback_query(F.data == "cmd_cleanup_inactive_users")
+async def callback_cleanup_inactive_users(callback: CallbackQuery):
+    """Массовое удаление всех неактивных пользователей."""
+    if callback.from_user.id != ADMIN:
+        await callback.answer("❌ Доступ запрещен", show_alert=True)
+        return
+    
+    try:
+        # Получаем количество неактивных пользователей для предварительной информации
+        inactive_count = await get_inactive_users_count()
+        
+        if inactive_count == 0:
+            await callback.message.edit_text(
+                "✅ <b>Нет неактивных пользователей</b>\n\n"
+                "Все пользователи в базе данных активно участвуют в игре.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_users")]
+                ])
+            )
+            return
+        
+        # Получаем детальную информацию по чатам
+        inactive_by_chat = await get_inactive_users_by_chat()
+        
+        # Формируем подробный отчет
+        report_text = f"🧹 <b>Массовое удаление неактивных пользователей</b>\n\n"
+        report_text += f"📊 <b>Найдено неактивных пользователей: {inactive_count}</b>\n\n"
+        
+        chat_count = len(inactive_by_chat)
+        if chat_count > 0:
+            report_text += f"📈 <b>Распределение по чатам:</b>\n"
+            for chat_id, users in inactive_by_chat.items():
+                user_count = len(users)
+                report_text += f"• Чат {chat_id}: {user_count} пользователей\n"
+            report_text += "\n"
+        
+        report_text += "⚠️ <b>Внимание:</b> Будут полностью удалены:\n"
+        report_text += "• Профили пользователей\n"
+        report_text += "• Все их булочки и очки\n"
+        report_text += "• История ежедневных выборов\n\n"
+        report_text += "❗ <b>Это действие необратимо!</b>\n\n"
+        report_text += "Продолжить массовое удаление?"
+        
+        confirm_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="✅ Да, удалить всех", callback_data="confirm_bulk_cleanup"),
+                InlineKeyboardButton(text="❌ Отмена", callback_data="admin_users")
+            ],
+            [
+                InlineKeyboardButton(text="👀 Показать подробный список", callback_data="show_inactive_details")
+            ]
+        ])
+        
+        await callback.message.edit_text(
+            report_text,
+            parse_mode="HTML",
+            reply_markup=confirm_keyboard
+        )
+        
+    except Exception as e:
+        error_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="cmd_cleanup_inactive_users")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_users")]
+        ])
+        
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка при подготовке удаления</b>\n\n"
+            f"Детали: <code>{str(e)}</code>",
+            parse_mode="HTML",
+            reply_markup=error_keyboard
+        )
+    
+    await callback.answer()
+
+
+@admin_cntr.callback_query(F.data == "show_inactive_details")
+async def callback_show_inactive_details(callback: CallbackQuery):
+    """Показать детальный список неактивных пользователей."""
+    if callback.from_user.id != ADMIN:
+        await callback.answer("❌ Доступ запрещен", show_alert=True)
+        return
+    
+    try:
+        inactive_by_chat = await get_inactive_users_by_chat()
+        
+        if not inactive_by_chat:
+            await callback.message.edit_text(
+                "✅ <b>Нет неактивных пользователей</b>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_users")]
+                ])
+            )
+            return
+        
+        # Формируем детальный отчет
+        report_parts = []
+        current_part = "👀 <b>Неактивные пользователи по чатам:</b>\n\n"
+        
+        for chat_id, users in inactive_by_chat.items():
+            chat_section = f"📍 <b>Чат {chat_id}:</b>\n"
+            for user in users:
+                display_name = f"@{user['username']}" if user['username'] else user['full_name']
+                chat_section += f"• {display_name} (ID: {user['telegram_id']})\n"
+            chat_section += "\n"
+            
+            # Проверяем, не превысит ли добавление новой секции лимит сообщения
+            if len(current_part + chat_section) > 3500:  # Оставляем запас для кнопок
+                report_parts.append(current_part)
+                current_part = chat_section
+            else:
+                current_part += chat_section
+        
+        # Добавляем последнюю часть
+        if current_part.strip():
+            report_parts.append(current_part)
+        
+        # Отправляем части отчета
+        for i, part in enumerate(report_parts):
+            if i == 0:
+                # Редактируем первое сообщение
+                await callback.message.edit_text(
+                    part,
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text="⬅️ Назад к удалению", callback_data="cmd_cleanup_inactive_users")]
+                    ])
+                )
+            else:
+                # Отправляем дополнительные сообщения
+                await callback.message.answer(part, parse_mode="HTML")
+        
+    except Exception as e:
+        error_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="cmd_cleanup_inactive_users")]
+        ])
+        
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка при получении списка</b>\n\n"
+            f"Детали: <code>{str(e)}</code>",
+            parse_mode="HTML",
+            reply_markup=error_keyboard
+        )
+    
+    await callback.answer()
+
+
+@admin_cntr.callback_query(F.data == "confirm_bulk_cleanup")
+async def callback_confirm_bulk_cleanup(callback: CallbackQuery):
+    """Подтверждение и выполнение массового удаления неактивных пользователей."""
+    if callback.from_user.id != ADMIN:
+        await callback.answer("❌ Доступ запрещен", show_alert=True)
+        return
+    
+    try:
+        await callback.message.edit_text(
+            "🔄 <b>Выполнение массового удаления...</b>\n\n"
+            "Удаление неактивных пользователей из всех таблиц...\n"
+            "⏳ Пожалуйста, подождите...",
+            parse_mode="HTML"
+        )
+        
+        # Выполняем массовое удаление
+        deleted_count, deleted_by_chat = await bulk_delete_inactive_users()
+        
+        if deleted_count == 0:
+            await callback.message.edit_text(
+                "✅ <b>Удаление завершено</b>\n\n"
+                "Неактивных пользователей не найдено.",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_users")]
+                ])
+            )
+            return
+        
+        # Формируем отчет об удалении
+        report_text = f"✅ <b>Массовое удаление завершено!</b>\n\n"
+        report_text += f"🗑️ <b>Удалено пользователей: {deleted_count}</b>\n\n"
+        
+        if deleted_by_chat:
+            report_text += f"📊 <b>Статистика по чатам:</b>\n"
+            for chat_id, users in deleted_by_chat.items():
+                report_text += f"📍 <b>Чат {chat_id}:</b> {len(users)} пользователей\n"
+                # Показываем первых нескольких пользователей
+                for i, user in enumerate(users[:3]):
+                    report_text += f"  • {user['display_name']}\n"
+                if len(users) > 3:
+                    report_text += f"  • ... и еще {len(users) - 3}\n"
+                report_text += "\n"
+        
+        report_text += "🧹 <b>Очищены данные:</b>\n"
+        report_text += "• Профили пользователей\n"
+        report_text += "• Все булочки и очки\n"
+        report_text += "• История ежедневных выборов\n\n"
+        report_text += "💾 База данных оптимизирована!"
+        
+        result_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🧹 Очистить еще раз", callback_data="cmd_cleanup_inactive_users")],
+            [InlineKeyboardButton(text="📋 Список пользователей", callback_data="cmd_user_list")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_users")]
+        ])
+        
+        await callback.message.edit_text(
+            report_text,
+            parse_mode="HTML",
+            reply_markup=result_keyboard
+        )
+        
+    except Exception as e:
+        error_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Попробовать снова", callback_data="cmd_cleanup_inactive_users")],
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_users")]
+        ])
+        
+        await callback.message.edit_text(
+            f"❌ <b>Ошибка при массовом удалении</b>\n\n"
+            f"Некоторые пользователи могли быть удалены частично.\n"
             f"Детали: <code>{str(e)}</code>",
             parse_mode="HTML",
             reply_markup=error_keyboard
