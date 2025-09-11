@@ -2607,16 +2607,28 @@ async def callback_evening_schedule_status(callback: CallbackQuery):
         # Получаем информацию о статусе cron задачи
         try:
             from main import evening_cron_task
-
-            task_status = (
-                "Активна"
-                if evening_cron_task
-                and hasattr(evening_cron_task, "started")
-                and evening_cron_task.started
-                else "Не активна"
-            )
-        except (ImportError, AttributeError):
+            
+            if evening_cron_task is not None:
+                # Проверяем различные атрибуты aiocron задачи
+                if hasattr(evening_cron_task, 'spec') and evening_cron_task.spec:
+                    task_status = "Активна"
+                    next_run_info = f" (cron: {evening_cron_task.spec})"
+                elif hasattr(evening_cron_task, '_spec') and evening_cron_task._spec:
+                    task_status = "Активна" 
+                    next_run_info = f" (cron: {evening_cron_task._spec})"
+                elif hasattr(evening_cron_task, 'crontab') and evening_cron_task.crontab:
+                    task_status = "Активна"
+                    next_run_info = f" (расписание: {evening_cron_task.crontab})"
+                else:
+                    # Задача существует, но не можем получить расписание
+                    task_status = "Активна"
+                    next_run_info = " (расписание скрыто)"
+            else:
+                task_status = "Не активна"
+                next_run_info = ""
+        except (ImportError, AttributeError, NameError) as e:
             task_status = "Недоступно"
+            next_run_info = f" (ошибка: {str(e)})"
 
         status_text = f"🕐 <b>Статус расписания вечерних сообщений</b>\n\n"
         status_text += (
@@ -2628,8 +2640,31 @@ async def callback_evening_schedule_status(callback: CallbackQuery):
         )
         status_text += f"✅ <b>Подходящее время?</b> {'Да' if schedule_info['is_evening_time'] else 'Нет'}\n\n"
 
-        status_text += f"🤖 <b>Статус планировщика:</b> {task_status}\n"
+        status_text += f"🤖 <b>Статус планировщика:</b> {task_status}{next_run_info}\n"
         status_text += f"📅 <b>Следующая возможность:</b> {schedule_info['next_possible_time']}\n\n"
+
+        # Добавляем информацию о следующей отправке если планировщик активен
+        if task_status == "Активна" and next_run_info:
+            # Извлекаем время из cron строки
+            try:
+                from main import evening_cron_task
+                cron_spec = None
+                
+                # Пытаемся получить расписание разными способами
+                if hasattr(evening_cron_task, 'spec') and evening_cron_task.spec:
+                    cron_spec = evening_cron_task.spec
+                elif hasattr(evening_cron_task, '_spec') and evening_cron_task._spec:
+                    cron_spec = evening_cron_task._spec
+                
+                if cron_spec:
+                    cron_parts = cron_spec.split()
+                    if len(cron_parts) >= 2:
+                        minute = int(cron_parts[0])
+                        hour_utc = int(cron_parts[1])
+                        hour_msk = (hour_utc + 3) % 24
+                        status_text += f"⏰ <b>Следующая отправка:</b> сегодня в {hour_msk:02d}:{minute:02d} МСК\n"
+            except (ValueError, AttributeError, NameError, ImportError):
+                pass
 
         if schedule_info["is_evening_time"]:
             status_text += "💡 <b>Сейчас подходящее время для отправки!</b>\n"
