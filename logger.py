@@ -5,34 +5,15 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from typing import Optional
 
-# Загружаем переменные из .env файла если он существует
-def load_env_file():
-    """Простой парсер .env файла."""
-    if not os.path.exists('.env'):
-        return
-    
-    try:
-        with open('.env', 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    key, value = line.split('=', 1)
-                    key = key.strip()
-                    value = value.strip().strip('"').strip("'")
-                    # Устанавливаем переменную окружения только если она еще не установлена
-                    if key not in os.environ:
-                        os.environ[key] = value
-    except Exception as e:
-        print(f"Warning: Could not load .env file: {e}")
-
-# Пытаемся использовать python-dotenv, если не получается - используем собственный парсер
+# В продакшне переменные передаются через Docker Compose
+# Локально можно использовать python-dotenv если установлен (опционально)
 try:
     from dotenv import load_dotenv
     if os.path.exists('.env'):
         load_dotenv()
 except ImportError:
-    # dotenv не установлен - используем собственный парсер
-    load_env_file()
+    # python-dotenv не установлен - работаем с переменными окружения напрямую
+    pass
 
 # Читаем настройки из переменных окружения
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
