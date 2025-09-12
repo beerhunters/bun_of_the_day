@@ -25,6 +25,11 @@ try:
     LOG_FILE_LEVEL = os.environ.get("LOG_FILE_LEVEL", "ERROR").upper()
     LOG_TELEGRAM_LEVEL = os.environ.get("LOG_TELEGRAM_LEVEL", "ERROR").upper()
     
+    # Настройки для rate limiting и retry
+    REQUEST_DELAY = float(os.environ.get("REQUEST_DELAY", "0.1"))  # Задержка между запросами в секундах
+    MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "3"))  # Максимальное количество попыток
+    RETRY_DELAY = int(os.environ.get("RETRY_DELAY", "5"))  # Базовая задержка для повторных попыток
+    
     # Проверяем валидность уровней для файла и телеграма
     if LOG_FILE_LEVEL not in valid_levels:
         print(f"Warning: Invalid LOG_FILE_LEVEL '{LOG_FILE_LEVEL}', using 'ERROR' instead")

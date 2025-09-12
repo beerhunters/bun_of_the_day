@@ -6,6 +6,7 @@ from typing import List
 from aiogram import Bot
 from database.queries import get_active_chat_ids
 from logger import logger
+from config import REQUEST_DELAY
 
 # Список юморных вечерних фраз
 EVENING_HUMOR_PHRASES = [
@@ -42,8 +43,8 @@ async def send_evening_humor(bot: Bot):
                 sent_count += 1
                 logger.info(f"Вечернее юморное сообщение отправлено в чат {chat_id}")
 
-                # Небольшая задержка между отправками, чтобы не спамить
-                await asyncio.sleep(0.5)
+                # Задержка между отправками для избежания flood control
+                await asyncio.sleep(REQUEST_DELAY)
 
             except Exception as e:
                 error_count += 1

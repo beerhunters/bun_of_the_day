@@ -6,8 +6,10 @@ from logger import logger
 import aiocron
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 
-from config import API_TOKEN
+from config import API_TOKEN, REQUEST_DELAY
 from handlers.admin_cntr import admin_cntr
 from handlers.admin_points import admin_points_r
 
@@ -38,6 +40,8 @@ async def send_daily_messages(bot: Bot):
             try:
                 await send_random_message(bot, chat_id=chat_id)
                 logger.info(f"Сообщение отправлено в чат {chat_id}")
+                # Добавляем задержку между запросами для избежания flood control
+                await asyncio.sleep(REQUEST_DELAY)
             except Exception as e:
                 logger.error(f"Ошибка при отправке сообщения в чат {chat_id}: {e}")
     except Exception as e:
@@ -117,7 +121,12 @@ async def main():
         logger.error(f"Ошибка при создании таблиц: {e}")
         return
 
-    bot = Bot(token=API_TOKEN)
+    bot = Bot(
+        token=API_TOKEN,
+        default=DefaultBotProperties(
+            parse_mode=ParseMode.HTML
+        )
+    )
     dp = Dispatcher()
     dp.include_routers(
         start_r,
@@ -164,7 +173,13 @@ async def main():
         except Exception as e:
             logger.error(f"Ошибка в тестовом блоке: {e}", exc_info=True)
 
-        await dp.start_polling(bot)
+        await dp.start_polling(
+            bot,
+            polling_timeout=30,  # Таймаут для long polling в секундах
+            request_timeout=60,  # Таймаут для HTTP запросов 
+            retry_after=5,       # Задержка перед повторной попыткой при ошибке
+            allowed_updates=["message", "callback_query", "chat_member"]  # Только нужные типы обновлений
+        )
     except Exception as e:
         logger.error(f"Ошибка при работе бота: {e}")
     finally:
