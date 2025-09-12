@@ -1,4 +1,6 @@
 import asyncio
+import signal
+import sys
 
 # Импортируем логгер в самом начале - он сам настроит все нужное
 from logger import logger
@@ -7,7 +9,9 @@ import aiocron
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
 from aiogram.client.default import DefaultBotProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
+import aiohttp
 
 from config import API_TOKEN, REQUEST_DELAY
 from handlers.admin_cntr import admin_cntr
@@ -110,8 +114,30 @@ async def send_evening_and_reschedule(bot: Bot):
             )
 
 
+async def shutdown_handler(bot: Bot, connector):
+    """Обработчик корректного завершения работы бота."""
+    logger.info("Получен сигнал завершения. Останавливаем бота...")
+    try:
+        if bot.session:
+            await bot.session.close()
+        if connector:
+            await connector.close()
+    except Exception as e:
+        logger.error(f"Ошибка при завершении работы: {e}")
+
+
 async def main():
     """Главная функция для запуска бота."""
+    bot = None
+    connector = None
+    
+    def signal_handler():
+        logger.info("Получен сигнал прерывания")
+        sys.exit(0)
+    
+    # Регистрируем обработчики сигналов
+    signal.signal(signal.SIGINT, lambda s, f: signal_handler())
+    signal.signal(signal.SIGTERM, lambda s, f: signal_handler())
 
     # Создаем недостающие таблицы перед запуском бота
     logger.info("Проверка и создание недостающих таблиц...")
@@ -121,8 +147,28 @@ async def main():
         logger.error(f"Ошибка при создании таблиц: {e}")
         return
 
+    # Настройка HTTP сессии с увеличенными таймаутами
+    timeout = aiohttp.ClientTimeout(
+        total=60,      # Общий таймаут для запроса
+        connect=10,    # Таймаут на подключение
+        sock_read=30   # Таймаут на чтение данных
+    )
+    
+    connector = aiohttp.TCPConnector(
+        limit=100,           # Максимальное количество соединений
+        limit_per_host=10,   # Максимальное количество соединений к одному хосту
+        ttl_dns_cache=300,   # TTL для DNS кэша в секундах
+        use_dns_cache=True   # Использовать DNS кэш
+    )
+    
+    session = AiohttpSession(
+        timeout=timeout,
+        connector=connector
+    )
+    
     bot = Bot(
         token=API_TOKEN,
+        session=session,
         default=DefaultBotProperties(
             parse_mode=ParseMode.HTML
         )
@@ -183,7 +229,15 @@ async def main():
     except Exception as e:
         logger.error(f"Ошибка при работе бота: {e}")
     finally:
-        await bot.session.close()
+        logger.info("Завершение работы бота...")
+        try:
+            if bot and bot.session:
+                await bot.session.close()
+            if connector:
+                await connector.close()
+        except Exception as cleanup_error:
+            logger.error(f"Ошибка при очистке ресурсов: {cleanup_error}")
+        logger.info("Ресурсы очищены, бот остановлен")
 
 
 if __name__ == "__main__":
