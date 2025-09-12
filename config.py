@@ -26,7 +26,7 @@ try:
     LOG_TELEGRAM_LEVEL = os.environ.get("LOG_TELEGRAM_LEVEL", "ERROR").upper()
     
     # Настройки для rate limiting и retry
-    REQUEST_DELAY = float(os.environ.get("REQUEST_DELAY", "0.1"))  # Задержка между запросами в секундах
+    REQUEST_DELAY = float(os.environ.get("REQUEST_DELAY", "1.0"))  # Задержка между запросами в секундах (1 сообщение в секунду для безопасности)
     MAX_RETRIES = int(os.environ.get("MAX_RETRIES", "3"))  # Максимальное количество попыток
     RETRY_DELAY = int(os.environ.get("RETRY_DELAY", "5"))  # Базовая задержка для повторных попыток
     

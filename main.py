@@ -9,9 +9,7 @@ import aiocron
 from aiogram import Bot, Dispatcher
 from aiogram.types import BotCommand
 from aiogram.client.default import DefaultBotProperties
-from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.enums import ParseMode
-import aiohttp
 
 from config import API_TOKEN, REQUEST_DELAY
 from handlers.admin_cntr import admin_cntr
@@ -24,7 +22,6 @@ from handlers.random_user import send_random_message
 from handlers.evening_humor import (
     send_evening_humor,
     get_random_evening_cron,
-    get_evening_schedule_info,
 )
 from handlers.start import start_r
 
@@ -56,18 +53,12 @@ async def send_daily_messages(bot: Bot):
 evening_cron_task = None
 
 
-async def schedule_random_evening_message(bot: Bot):
-    """Планирование отправки вечернего сообщения на случайное время."""
+async def schedule_evening_message(bot: Bot):
+    """Планирование отправки вечернего сообщения на фиксированное время 20:00."""
     global evening_cron_task
 
     try:
-        # Получаем информацию о текущем времени
-        schedule_info = get_evening_schedule_info()
-        logger.info(
-            f"Планирование вечерних сообщений - текущее время МСК: {schedule_info['current_moscow_time']}"
-        )
-
-        # Получаем случайное время для следующего вечернего сообщения
+        # Получаем фиксированное время для вечернего сообщения
         cron_time = get_random_evening_cron()
 
         # Останавливаем предыдущую задачу, если она была
@@ -75,61 +66,27 @@ async def schedule_random_evening_message(bot: Bot):
             evening_cron_task.stop()
             logger.info("Предыдущая задача вечерних сообщений остановлена")
 
-        # Создаем новую задачу на случайное время
+        # Создаем задачу на фиксированное время (20:00 каждый день)
         evening_cron_task = aiocron.crontab(
             cron_time,
-            func=lambda: asyncio.create_task(send_evening_and_reschedule(bot)),
+            func=lambda: asyncio.create_task(send_evening_humor(bot)),
             start=True,
         )
 
         # Сразу стартуем задачу
         evening_cron_task.start()
-        logger.info(f"✅ Задача вечерних сообщений создана и запущена: {cron_time}")
+        logger.info(f"✅ Задача вечерних сообщений запущена: {cron_time}")
 
     except Exception as e:
         logger.error(f"Ошибка при планировании вечернего сообщения: {e}")
 
 
-async def send_evening_and_reschedule(bot: Bot):
-    """Отправка вечернего сообщения и планирование следующего."""
-    try:
-        logger.info("🌇 Начинается отправка вечернего юморного сообщения...")
 
-        # Отправляем вечернее сообщение
-        await send_evening_humor(bot)
-        logger.info("✅ Вечернее сообщение отправлено успешно")
-
-        # Планируем следующее сообщение на завтра
-        logger.info("🔄 Планируем следующее вечернее сообщение на завтра...")
-        await schedule_random_evening_message(bot)
-
-    except Exception as e:
-        logger.error(f"Ошибка при отправке и перепланировании вечернего сообщения: {e}")
-        # Попробуем перепланировать хотя бы следующее сообщение
-        try:
-            await schedule_random_evening_message(bot)
-        except Exception as reschedule_error:
-            logger.error(
-                f"Критическая ошибка: не удалось перепланировать вечернее сообщение: {reschedule_error}"
-            )
-
-
-async def shutdown_handler(bot: Bot, connector):
-    """Обработчик корректного завершения работы бота."""
-    logger.info("Получен сигнал завершения. Останавливаем бота...")
-    try:
-        if bot.session:
-            await bot.session.close()
-        if connector:
-            await connector.close()
-    except Exception as e:
-        logger.error(f"Ошибка при завершении работы: {e}")
 
 
 async def main():
     """Главная функция для запуска бота."""
     bot = None
-    connector = None
     
     def signal_handler():
         logger.info("Получен сигнал прерывания")
@@ -147,28 +104,8 @@ async def main():
         logger.error(f"Ошибка при создании таблиц: {e}")
         return
 
-    # Настройка HTTP сессии с увеличенными таймаутами
-    timeout = aiohttp.ClientTimeout(
-        total=60,      # Общий таймаут для запроса
-        connect=10,    # Таймаут на подключение
-        sock_read=30   # Таймаут на чтение данных
-    )
-    
-    connector = aiohttp.TCPConnector(
-        limit=100,           # Максимальное количество соединений
-        limit_per_host=10,   # Максимальное количество соединений к одному хосту
-        ttl_dns_cache=300,   # TTL для DNS кэша в секундах
-        use_dns_cache=True   # Использовать DNS кэш
-    )
-    
-    session = AiohttpSession(
-        timeout=timeout,
-        connector=connector
-    )
-    
     bot = Bot(
         token=API_TOKEN,
-        session=session,
         default=DefaultBotProperties(
             parse_mode=ParseMode.HTML
         )
@@ -201,7 +138,7 @@ async def main():
             logger.info("Задача отправки утренних сообщений запущена...")
 
             # Запускаем планировщик вечерних юморных сообщений
-            await schedule_random_evening_message(bot)
+            await schedule_evening_message(bot)
             logger.info("Планировщик вечерних юморных сообщений запущен...")
 
         except Exception as e:
@@ -219,13 +156,7 @@ async def main():
         except Exception as e:
             logger.error(f"Ошибка в тестовом блоке: {e}", exc_info=True)
 
-        await dp.start_polling(
-            bot,
-            polling_timeout=30,  # Таймаут для long polling в секундах
-            request_timeout=60,  # Таймаут для HTTP запросов 
-            retry_after=5,       # Задержка перед повторной попыткой при ошибке
-            allowed_updates=["message", "callback_query", "chat_member"]  # Только нужные типы обновлений
-        )
+        await dp.start_polling(bot)
     except Exception as e:
         logger.error(f"Ошибка при работе бота: {e}")
     finally:
@@ -233,8 +164,6 @@ async def main():
         try:
             if bot and bot.session:
                 await bot.session.close()
-            if connector:
-                await connector.close()
         except Exception as cleanup_error:
             logger.error(f"Ошибка при очистке ресурсов: {cleanup_error}")
         logger.info("Ресурсы очищены, бот остановлен")
