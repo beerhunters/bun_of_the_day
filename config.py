@@ -19,10 +19,30 @@ try:
         print(f"Warning: Invalid LOG_LEVEL '{LOG_LEVEL}', using 'INFO' instead")
         LOG_LEVEL = "INFO"
     
+    # Дополнительные настройки логирования
+    LOG_TO_FILE = os.environ.get("LOG_TO_FILE", "true").lower() in ["true", "1", "yes"]
+    LOG_TO_TELEGRAM = os.environ.get("LOG_TO_TELEGRAM", "true").lower() in ["true", "1", "yes"]  
+    LOG_FILE_LEVEL = os.environ.get("LOG_FILE_LEVEL", "ERROR").upper()
+    LOG_TELEGRAM_LEVEL = os.environ.get("LOG_TELEGRAM_LEVEL", "ERROR").upper()
+    
+    # Проверяем валидность уровней для файла и телеграма
+    if LOG_FILE_LEVEL not in valid_levels:
+        print(f"Warning: Invalid LOG_FILE_LEVEL '{LOG_FILE_LEVEL}', using 'ERROR' instead")
+        LOG_FILE_LEVEL = "ERROR"
+        
+    if LOG_TELEGRAM_LEVEL not in valid_levels:
+        print(f"Warning: Invalid LOG_TELEGRAM_LEVEL '{LOG_TELEGRAM_LEVEL}', using 'ERROR' instead") 
+        LOG_TELEGRAM_LEVEL = "ERROR"
+    
 except KeyError as ex:
     print(f"Error: Missing required environment variable: {ex}")
     print("Please ensure the following variables are set: API_TOKEN, ADMIN_ID, FOR_LOGS")
-    print("Optional: LOG_LEVEL (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
+    print("Optional logging variables:")
+    print("  LOG_LEVEL (DEBUG, INFO, WARNING, ERROR, CRITICAL) - Console output level")
+    print("  LOG_TO_FILE (true/false) - Enable file logging")
+    print("  LOG_TO_TELEGRAM (true/false) - Enable Telegram error notifications")
+    print("  LOG_FILE_LEVEL (DEBUG, INFO, WARNING, ERROR, CRITICAL) - File logging level")
+    print("  LOG_TELEGRAM_LEVEL (DEBUG, INFO, WARNING, ERROR, CRITICAL) - Telegram notifications level")
     sys.exit(1)
 except ValueError as ex:
     print(f"Error: Invalid value for environment variable: {ex}")

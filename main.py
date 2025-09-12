@@ -1,26 +1,6 @@
 import asyncio
-import logging
-import os
 
-# Получаем LOG_LEVEL напрямую из переменных окружения
-LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
-LOG_LEVEL_MAPPING = {
-    "DEBUG": logging.DEBUG,
-    "INFO": logging.INFO,
-    "WARNING": logging.WARNING,
-    "ERROR": logging.ERROR,
-    "CRITICAL": logging.CRITICAL
-}
-app_log_level = LOG_LEVEL_MAPPING.get(LOG_LEVEL, logging.INFO)
-
-# ВАЖНО: Настраиваем логирование для внешних библиотек ДО их импорта
-logging.getLogger("aiogram").setLevel(logging.WARNING)
-logging.getLogger("aiogram.event").setLevel(logging.WARNING)
-logging.getLogger("aiogram.dispatcher").setLevel(logging.WARNING)
-logging.getLogger("aiohttp").setLevel(logging.WARNING)
-logging.getLogger("aiosqlite").setLevel(logging.WARNING)
-
-# Теперь импортируем logger
+# Импортируем логгер в самом начале - он сам настроит все нужное
 from logger import logger
 
 import aiocron
@@ -171,7 +151,19 @@ async def main():
 
         except Exception as e:
             logger.error(f"Ошибка при запуске задач: {e}")
-        logger.info("Бот запущен...")
+        logger.info("🚀 Бот запущен и готов к работе!")
+
+        # Тестируем систему уведомлений (можно убрать после проверки)
+        try:
+            logger.info("📝 Тестирование новой системы логирования...")
+            # Раскомментируйте следующую строку для тестирования Telegram уведомлений
+            # logger.error(
+            #     "🧪 Тест критической ошибки для проверки Telegram уведомлений",
+            #     exc_info=True,
+            # )
+        except Exception as e:
+            logger.error(f"Ошибка в тестовом блоке: {e}", exc_info=True)
+
         await dp.start_polling(bot)
     except Exception as e:
         logger.error(f"Ошибка при работе бота: {e}")
