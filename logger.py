@@ -5,21 +5,58 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from typing import Optional
 
-# Импортируем настройки из config с защитой от циклического импорта
+# Загружаем переменные из .env файла если он существует
+def load_env_file():
+    """Простой парсер .env файла."""
+    if not os.path.exists('.env'):
+        return
+    
+    try:
+        with open('.env', 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    key = key.strip()
+                    value = value.strip().strip('"').strip("'")
+                    # Устанавливаем переменную окружения только если она еще не установлена
+                    if key not in os.environ:
+                        os.environ[key] = value
+    except Exception as e:
+        print(f"Warning: Could not load .env file: {e}")
+
+# Пытаемся использовать python-dotenv, если не получается - используем собственный парсер
 try:
-    from config import (
-        LOG_LEVEL, LOG_TO_FILE, LOG_TO_TELEGRAM, LOG_FILE_LEVEL, 
-        LOG_TELEGRAM_LEVEL, API_TOKEN, FOR_LOGS
-    )
+    from dotenv import load_dotenv
+    if os.path.exists('.env'):
+        load_dotenv()
 except ImportError:
-    # Fallback значения если config еще не загружен
-    LOG_LEVEL = "INFO"
-    LOG_TO_FILE = True
-    LOG_TO_TELEGRAM = True
-    LOG_FILE_LEVEL = "ERROR"
-    LOG_TELEGRAM_LEVEL = "ERROR"
-    API_TOKEN = None
+    # dotenv не установлен - используем собственный парсер
+    load_env_file()
+
+# Читаем настройки из переменных окружения
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+LOG_TO_FILE = os.getenv("LOG_TO_FILE", "true").lower() in ["true", "1", "yes"]
+LOG_TO_TELEGRAM = os.getenv("LOG_TO_TELEGRAM", "true").lower() in ["true", "1", "yes"]
+LOG_FILE_LEVEL = os.getenv("LOG_FILE_LEVEL", "ERROR").upper()
+LOG_TELEGRAM_LEVEL = os.getenv("LOG_TELEGRAM_LEVEL", "ERROR").upper()
+API_TOKEN = os.getenv("API_TOKEN")
+try:
+    FOR_LOGS = int(os.getenv("FOR_LOGS", "0")) if os.getenv("FOR_LOGS") else None
+except (ValueError, TypeError):
     FOR_LOGS = None
+
+# Валидация уровней
+valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+if LOG_LEVEL not in valid_levels:
+    print(f"Warning: Invalid LOG_LEVEL '{LOG_LEVEL}', using 'INFO' instead")
+    LOG_LEVEL = "INFO"
+if LOG_FILE_LEVEL not in valid_levels:
+    print(f"Warning: Invalid LOG_FILE_LEVEL '{LOG_FILE_LEVEL}', using 'ERROR' instead")
+    LOG_FILE_LEVEL = "ERROR"
+if LOG_TELEGRAM_LEVEL not in valid_levels:
+    print(f"Warning: Invalid LOG_TELEGRAM_LEVEL '{LOG_TELEGRAM_LEVEL}', using 'ERROR' instead")
+    LOG_TELEGRAM_LEVEL = "ERROR"
 
 # Создаем директорию для логов
 if not os.path.exists("logs"):
@@ -113,8 +150,13 @@ class TelegramHandler(logging.Handler):
                     tb = tb[:1000] + "...[truncated]"
                 message += f"\n📋 <b>Traceback:</b>\n<code>{tb}</code>"
             
-            # Отправляем асинхронно
-            asyncio.create_task(self._send_to_telegram(message))
+            # Отправляем асинхронно (только если event loop запущен)
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self._send_to_telegram(message))
+            except RuntimeError:
+                # Event loop не запущен - запускаем синхронно
+                asyncio.run(self._send_to_telegram(message))
             
         except Exception as e:
             # Не логируем ошибки отправки в Telegram, чтобы избежать циклов
@@ -219,8 +261,13 @@ def setup_external_loggers(log_level: int):
         "aiohttp", "aiosqlite", "aiocron"
     ]
     
-    # Для внешних библиотек устанавливаем WARNING или выше, если основной уровень ERROR
-    external_level = logging.WARNING if log_level >= logging.ERROR else log_level
+    # Для внешних библиотек устанавливаем WARNING или выше, если основной уровень ERROR или CRITICAL
+    if log_level >= logging.ERROR:
+        external_level = logging.WARNING
+    elif log_level >= logging.WARNING:
+        external_level = logging.WARNING  
+    else:
+        external_level = log_level
     
     for lib in external_libs:
         logging.getLogger(lib).setLevel(external_level)

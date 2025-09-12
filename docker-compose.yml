@@ -7,6 +7,7 @@ services:
       - API_TOKEN=${API_TOKEN}
       - ADMIN_ID=${ADMIN_ID}
       - FOR_LOGS=${FOR_LOGS}
+      - LOG_LEVEL=${LOG_LEVEL}
       - DB_ECHO=False
     volumes:
       - ./logs:/app/logs
