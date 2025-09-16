@@ -11,7 +11,7 @@ services:
       - DB_ECHO=False
     volumes:
       - ./logs:/app/logs
-      - ./db.sqlite3:/app/db.sqlite3
+      - ./croissant.db:/app/croissant.db
     deploy:
       resources:
         limits:

@@ -6,7 +6,7 @@ from database.models import Base
 from logger import logger
 
 DOCKER_ENV = os.getenv("DOCKER_ENV", "True") == "True"
-DB_PATH = "/app/db.sqlite3" if DOCKER_ENV else "db.sqlite3"
+DB_PATH = "/app/croissant.db" if DOCKER_ENV else "croissant.db"
 ENGINE_ECHO = os.getenv("DB_ECHO", "False") == "True"
 engine = create_async_engine(url=f"sqlite+aiosqlite:///{DB_PATH}", echo=ENGINE_ECHO)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
