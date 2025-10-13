@@ -52,6 +52,12 @@ POINTS_STATES = {
 # ========== ОБРАБОТЧИКИ ИНЛАЙН КНОПОК ==========
 
 
+@admin_cntr.callback_query(F.data == "noop")
+async def noop_handler(callback: CallbackQuery):
+    """Обработчик для кнопок, которые ничего не делают (например, индикатор страницы)."""
+    await callback.answer()
+
+
 @admin_cntr.callback_query(F.data == "admin_users")
 async def admin_users_menu(callback: CallbackQuery):
     """Меню управления пользователями."""
@@ -360,7 +366,12 @@ async def callback_remove_select_user(callback: CallbackQuery):
         await callback.answer("❌ Доступ запрещен", show_alert=True)
         return
 
-    chat_id = int(callback.data.split("_")[-1])
+    # Парсим callback_data: remove_select_chat_{chat_id} или remove_select_chat_{chat_id}_page_{page}
+    parts = callback.data.split("_")
+    chat_id = int(parts[3])
+    page = 0
+    if len(parts) > 4 and parts[4] == "page":
+        page = int(parts[5])
 
     # Получаем пользователей из этого чата
     users = await get_all_users()
@@ -390,9 +401,25 @@ async def callback_remove_select_user(callback: CallbackQuery):
     except:
         chat_title = f"Чат {chat_id}"
 
+    # Пагинация: показываем по 15 пользователей на странице
+    USERS_PER_PAGE = 15
+    sorted_users = sorted(chat_users, key=lambda x: x["full_name"])
+    total_users = len(sorted_users)
+    total_pages = (total_users + USERS_PER_PAGE - 1) // USERS_PER_PAGE
+
+    # Проверяем корректность страницы
+    if page < 0:
+        page = 0
+    if page >= total_pages:
+        page = total_pages - 1
+
+    start_idx = page * USERS_PER_PAGE
+    end_idx = min(start_idx + USERS_PER_PAGE, total_users)
+    page_users = sorted_users[start_idx:end_idx]
+
     # Создаем кнопки для выбора пользователя
     keyboard_rows = []
-    for user in sorted(chat_users, key=lambda x: x["full_name"]):
+    for user in page_users:
         display_name = f"@{user['username']}" if user["username"] else user["full_name"]
         keyboard_rows.append(
             [
@@ -402,6 +429,31 @@ async def callback_remove_select_user(callback: CallbackQuery):
                 )
             ]
         )
+
+    # Добавляем кнопки навигации, если страниц больше одной
+    if total_pages > 1:
+        nav_buttons = []
+        if page > 0:
+            nav_buttons.append(
+                InlineKeyboardButton(
+                    text="⬅️ Назад",
+                    callback_data=f"remove_select_chat_{chat_id}_page_{page - 1}",
+                )
+            )
+        nav_buttons.append(
+            InlineKeyboardButton(
+                text=f"📄 {page + 1}/{total_pages}",
+                callback_data="noop",
+            )
+        )
+        if page < total_pages - 1:
+            nav_buttons.append(
+                InlineKeyboardButton(
+                    text="Вперёд ➡️",
+                    callback_data=f"remove_select_chat_{chat_id}_page_{page + 1}",
+                )
+            )
+        keyboard_rows.append(nav_buttons)
 
     keyboard_rows.append(
         [
@@ -415,7 +467,8 @@ async def callback_remove_select_user(callback: CallbackQuery):
         f"🗑 <b>Полное удаление пользователя из базы данных</b>\n\n"
         f"Чат: <b>{chat_title}</b>\n"
         f"⚠️ <i>Внимание: Будут удалены ВСЕ данные пользователя!</i>\n\n"
-        f"Шаг 2/2: Выберите пользователя для полного удаления:",
+        f"Шаг 2/2: Выберите пользователя для полного удаления:\n"
+        f"Показано {start_idx + 1}-{end_idx} из {total_users}",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_rows),
     )
