@@ -37,8 +37,12 @@ async def send_random_message(bot: Bot, chat_id: int):
     """Отправка интерактивного сообщения с выбором справедливо случайной булочки."""
     user = await get_fair_random_user(chat_id=chat_id)
     if not user:
-        await bot.send_message(chat_id, "В этом чате нет активных игроков! 😔")
-        logger.warning(f"Нет активных пользователей в чате {chat_id}")
+        await bot.send_message(
+            chat_id,
+            "В этом чате нет активных игроков с username! 😔\n"
+            "Попросите участников установить username в настройках Telegram."
+        )
+        logger.warning(f"Нет активных пользователей с username в чате {chat_id}")
         return
 
     display_name = f"@{user.username}" if user.username else user.full_name

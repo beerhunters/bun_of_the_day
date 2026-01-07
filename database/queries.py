@@ -73,9 +73,14 @@ async def set_user_out_of_game(session: AsyncSession, telegram_id: int, chat_id:
 @with_session
 async def get_fair_random_user(session: AsyncSession, chat_id: int):
     """Получение справедливо случайного пользователя из чата с учетом истории."""
-    # Получаем всех активных пользователей чата
+    # Получаем всех активных пользователей чата с username
     result = await session.execute(
-        select(User).where(User.chat_id == chat_id, User.in_game == True)
+        select(User).where(
+            User.chat_id == chat_id,
+            User.in_game == True,
+            User.username.is_not(None),
+            User.username != ''
+        )
     )
     users = result.scalars().all()
     
