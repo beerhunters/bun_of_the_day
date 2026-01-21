@@ -362,16 +362,20 @@ async def callback_remove_from_game_start(callback: CallbackQuery):
 
 @admin_cntr.message(Command(commands="refresh_usernames"))
 async def refresh_usernames_handler(message: types.Message, bot):
-    """Принудительное обновление юзернеймов всех пользователей из Telegram API."""
+    """
+    Обновляет юзернеймы, удаляет пользователей без username и тех, кого бот не видит.
+    """
     if message.chat.type != "private" or message.from_user.id != ADMIN:
-        await message.reply(
-            "Эта команда доступна только администратору в личных сообщениях!"
-        )
+        await message.reply("Эта команда доступна только администратору в личных сообщениях!")
         return
 
     status_message = await message.reply(
-        "🔄 <b>Начинаю проверку и обновление юзернеймов...</b>\nЭто может занять некоторое время.",
-        parse_mode="HTML",
+        "🔄 <b>Запущена полная ревизия пользователей...</b>\n"
+        "1. Проверка актуальности юзернеймов\n"
+        "2. Удаление пользователей без username\n"
+        "3. Удаление недоступных пользователей (ошибки доступа)\n\n"
+        "⏳ Ждите отчета...",
+        parse_mode="HTML"
     )
 
     users = await get_all_users()
@@ -379,64 +383,91 @@ async def refresh_usernames_handler(message: types.Message, bot):
         await status_message.edit_text("❌ Пользователей в базе не найдено.")
         return
 
+    # Списки для отчета
     updated_users = []
-    errors_count = 0
+    deleted_no_username = []
+    deleted_access_error = []
+
     checked_count = 0
 
     for user_data in users:
         telegram_id = user_data["telegram_id"]
         chat_id = user_data["chat_id"]
         current_db_username = user_data["username"]
+        display_name = f"@{current_db_username}" if current_db_username else f"ID {telegram_id}"
 
         try:
-            # Пытаемся получить актуальные данные о пользователе из чата
-            # Используем get_chat_member, так как бот может не видеть пользователя глобально, но видит в чате
-            chat_member = await bot.get_chat_member(
-                chat_id=chat_id, user_id=telegram_id
-            )
+            # 1. Пытаемся получить участника чата
+            chat_member = await bot.get_chat_member(chat_id=chat_id, user_id=telegram_id)
+
+            # Проверяем статус (не покинул ли он чат)
+            if chat_member.status in ["left", "kicked"]:
+                raise Exception(f"Пользователь имеет статус {chat_member.status}")
+
             actual_username = chat_member.user.username
 
-            # Если юзернейма нет, Telegram возвращает None
+            # 2. Проверка на наличие username
+            if not actual_username:
+                # Если у пользователя нет юзернейма - удаляем
+                await delete_user_completely(telegram_id=telegram_id, chat_id=chat_id)
+                deleted_no_username.append(f"{display_name} (Имя: {chat_member.user.full_name})")
 
-            # Проверяем и обновляем БД
-            was_updated = await update_user_username(
-                telegram_id=telegram_id, new_username=actual_username
-            )
-
-            if was_updated:
-                old_fmt = (
-                    f"@{current_db_username}" if current_db_username else "Без ника"
-                )
-                new_fmt = f"@{actual_username}" if actual_username else "Без ника"
-                updated_users.append(f"ID {telegram_id}: {old_fmt} ➡️ {new_fmt}")
-
-            checked_count += 1
-
-            # Небольшая пауза, чтобы не словить FloodWait от Telegram при большом списке
-            if checked_count % 10 == 0:
-                await asyncio.sleep(0.5)
+            # 3. Обновление username
+            else:
+                was_updated = await update_user_username(telegram_id=telegram_id, new_username=actual_username)
+                if was_updated:
+                    old_fmt = f"@{current_db_username}" if current_db_username else "Без ника"
+                    updated_users.append(f"ID {telegram_id}: {old_fmt} ➡️ @{actual_username}")
 
         except Exception as e:
-            # Например, если пользователь покинул чат или бот удален из чата
-            errors_count += 1
-            # logger.warning(f"Не удалось проверить пользователя {telegram_id} в чате {chat_id}: {e}")
-            continue
+            # 4. Обработка ошибки доступа (бот не видит юзера, юзер забанил бота, чат недоступен)
+            try:
+                await delete_user_completely(telegram_id=telegram_id, chat_id=chat_id)
+                deleted_access_error.append(f"{display_name} (Чат: {chat_id}) - {str(e)[:30]}...")
+            except Exception as del_error:
+                pass
+                # logger.error(f"Не удалось удалить пользователя {telegram_id} после ошибки доступа: {del_error}")
 
-    # Формируем отчет
-    report = f"✅ <b>Обновление завершено!</b>\n\n"
-    report += f"👥 Всего проверено: {checked_count}\n"
-    report += f"❌ Ошибок доступа: {errors_count}\n"
-    report += f"📝 Обновлено профилей: {len(updated_users)}\n\n"
+        checked_count += 1
 
+        # Пауза каждые 10 проверок, чтобы не получить FloodWait
+        if checked_count % 10 == 0:
+            await asyncio.sleep(0.5)
+
+    # === Формирование отчета ===
+    report = f"✅ <b>Ревизия завершена!</b>\n"
+    report += f"👥 Всего проверено: {checked_count}\n\n"
+
+    # Секция обновленных
     if updated_users:
-        report += "<b>Список изменений:</b>\n"
-        # Выводим первые 20 обновленных, чтобы не переполнить сообщение
-        report += "\n".join(updated_users[:20])
-        if len(updated_users) > 20:
-            report += f"\n... и еще {len(updated_users) - 20}"
+        report += f"📝 <b>Обновлено юзернеймов: {len(updated_users)}</b>\n"
+        report += "\n".join(updated_users[:10])
+        if len(updated_users) > 10:
+            report += f"\n...и еще {len(updated_users) - 10}"
+        report += "\n\n"
     else:
-        report += "Все юзернеймы актуальны."
+        report += "📝 Юзернеймы не требовали обновлений.\n\n"
 
+    # Секция удаленных (без ника)
+    if deleted_no_username:
+        report += f"🚫 <b>Удалено (нет username): {len(deleted_no_username)}</b>\n"
+        report += "\n".join(deleted_no_username[:10])
+        if len(deleted_no_username) > 10:
+            report += f"\n...и еще {len(deleted_no_username) - 10}"
+        report += "\n\n"
+    else:
+        report += "🚫 Пользователей без username не найдено.\n\n"
+
+    # Секция удаленных (ошибка доступа)
+    if deleted_access_error:
+        report += f"🗑 <b>Удалено (ошибка доступа/вышли): {len(deleted_access_error)}</b>\n"
+        report += "\n".join(deleted_access_error[:10])
+        if len(deleted_access_error) > 10:
+            report += f"\n...и еще {len(deleted_access_error) - 10}"
+    else:
+        report += "🗑 Недоступных пользователей не найдено."
+
+    # Отправка отчета (если слишком длинный, aiogram разобьет сам или обрежет, но мы ограничили списки)
     await status_message.edit_text(report, parse_mode="HTML")
 
 
