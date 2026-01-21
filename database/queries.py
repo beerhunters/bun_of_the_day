@@ -749,3 +749,23 @@ async def bulk_delete_inactive_users(session: AsyncSession):
         await session.rollback()
         logger.error(f"Ошибка при массовом удалении неактивных пользователей: {e}")
         raise
+
+@with_session
+async def update_user_username(session: AsyncSession, telegram_id: int, new_username: str | None):
+    """Обновление username пользователя по telegram_id."""
+    try:
+        # Ищем пользователя по telegram_id
+        result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+        user = result.scalars().first()
+
+        if user:
+            # Обновляем только если username изменился
+            if user.username != new_username:
+                user.username = new_username
+                await session.commit()
+                return True
+        return False
+    except Exception as e:
+        await session.rollback()
+        logger.error(f"Ошибка при обновлении username для {telegram_id}: {e}")
+        return False

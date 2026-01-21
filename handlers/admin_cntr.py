@@ -7,6 +7,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQu
 from config import ADMIN
 from database.queries import (
     get_all_users,
+    update_user_username,
     remove_user_from_game,
     delete_user_completely,
     get_all_buns,
@@ -357,6 +358,86 @@ async def callback_remove_from_game_start(callback: CallbackQuery):
         reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard_rows),
     )
     await callback.answer()
+
+
+@admin_cntr.message(Command(commands="refresh_usernames"))
+async def refresh_usernames_handler(message: types.Message, bot):
+    """Принудительное обновление юзернеймов всех пользователей из Telegram API."""
+    if message.chat.type != "private" or message.from_user.id != ADMIN:
+        await message.reply(
+            "Эта команда доступна только администратору в личных сообщениях!"
+        )
+        return
+
+    status_message = await message.reply(
+        "🔄 <b>Начинаю проверку и обновление юзернеймов...</b>\nЭто может занять некоторое время.",
+        parse_mode="HTML",
+    )
+
+    users = await get_all_users()
+    if not users:
+        await status_message.edit_text("❌ Пользователей в базе не найдено.")
+        return
+
+    updated_users = []
+    errors_count = 0
+    checked_count = 0
+
+    for user_data in users:
+        telegram_id = user_data["telegram_id"]
+        chat_id = user_data["chat_id"]
+        current_db_username = user_data["username"]
+
+        try:
+            # Пытаемся получить актуальные данные о пользователе из чата
+            # Используем get_chat_member, так как бот может не видеть пользователя глобально, но видит в чате
+            chat_member = await bot.get_chat_member(
+                chat_id=chat_id, user_id=telegram_id
+            )
+            actual_username = chat_member.user.username
+
+            # Если юзернейма нет, Telegram возвращает None
+
+            # Проверяем и обновляем БД
+            was_updated = await update_user_username(
+                telegram_id=telegram_id, new_username=actual_username
+            )
+
+            if was_updated:
+                old_fmt = (
+                    f"@{current_db_username}" if current_db_username else "Без ника"
+                )
+                new_fmt = f"@{actual_username}" if actual_username else "Без ника"
+                updated_users.append(f"ID {telegram_id}: {old_fmt} ➡️ {new_fmt}")
+
+            checked_count += 1
+
+            # Небольшая пауза, чтобы не словить FloodWait от Telegram при большом списке
+            if checked_count % 10 == 0:
+                await asyncio.sleep(0.5)
+
+        except Exception as e:
+            # Например, если пользователь покинул чат или бот удален из чата
+            errors_count += 1
+            # logger.warning(f"Не удалось проверить пользователя {telegram_id} в чате {chat_id}: {e}")
+            continue
+
+    # Формируем отчет
+    report = f"✅ <b>Обновление завершено!</b>\n\n"
+    report += f"👥 Всего проверено: {checked_count}\n"
+    report += f"❌ Ошибок доступа: {errors_count}\n"
+    report += f"📝 Обновлено профилей: {len(updated_users)}\n\n"
+
+    if updated_users:
+        report += "<b>Список изменений:</b>\n"
+        # Выводим первые 20 обновленных, чтобы не переполнить сообщение
+        report += "\n".join(updated_users[:20])
+        if len(updated_users) > 20:
+            report += f"\n... и еще {len(updated_users) - 20}"
+    else:
+        report += "Все юзернеймы актуальны."
+
+    await status_message.edit_text(report, parse_mode="HTML")
 
 
 @admin_cntr.callback_query(F.data.startswith("remove_select_chat_"))
@@ -2677,7 +2758,9 @@ async def callback_evening_schedule_status(callback: CallbackQuery):
         # Информация о работе планировщика
         status_text += "📱 <b>Режим работы:</b>\n"
         status_text += "• При запуске приложения автоматически выбирается случайное время 18:00-22:00 МСК\n"
-        status_text += "• После отправки сообщения планируется новое время на следующий день\n"
+        status_text += (
+            "• После отправки сообщения планируется новое время на следующий день\n"
+        )
         status_text += "• Время никогда не выбирается в прошлом\n\n"
 
         if schedule_info["is_evening_time"]:
@@ -3148,5 +3231,3 @@ async def callback_points_cancel(callback: CallbackQuery):
         ),
     )
     await callback.answer()
-
-
