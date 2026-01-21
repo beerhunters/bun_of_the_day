@@ -75,6 +75,12 @@ async def admin_users_menu(callback: CallbackQuery):
             ],
             [
                 InlineKeyboardButton(
+                    text="🔫 Обновить пользователей",
+                    callback_data="cmd_refresh_usernames",
+                )
+            ],
+            [
+                InlineKeyboardButton(
                     text="🗑 Полностью удалить пользователя",
                     callback_data="cmd_remove_from_game",
                 )
@@ -360,29 +366,40 @@ async def callback_remove_from_game_start(callback: CallbackQuery):
     await callback.answer()
 
 
-@admin_cntr.message(Command(commands="refresh_usernames"))
-async def refresh_usernames_handler(message: types.Message, bot):
+@admin_cntr.callback_query(F.data == "cmd_refresh_usernames")
+async def refresh_usernames_handler(callback: CallbackQuery):
     """
     Обновляет юзернеймы, удаляет пользователей без username и тех, кого бот не видит.
     """
-    if message.chat.type != "private" or message.from_user.id != ADMIN:
-        await message.reply(
-            "Эта команда доступна только администратору в личных сообщениях!"
-        )
+    # Проверка прав
+    if callback.from_user.id != ADMIN:
+        await callback.answer("❌ Доступ запрещен", show_alert=True)
         return
 
-    status_message = await message.reply(
+    # Сообщаем, что процесс пошел (редактируем сообщение с кнопками)
+    await callback.message.edit_text(
         "🔄 <b>Запущена полная ревизия пользователей...</b>\n"
         "1. Проверка актуальности юзернеймов\n"
         "2. Удаление пользователей без username\n"
         "3. Удаление недоступных пользователей (ошибки доступа)\n\n"
-        "⏳ Ждите отчета...",
+        "⏳ <i>Пожалуйста, подождите, это может занять время...</i>",
         parse_mode="HTML",
     )
 
     users = await get_all_users()
+
+    # Кнопка для возврата (используется при ошибке или завершении)
+    back_keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад", callback_data="admin_users")]
+        ]
+    )
+
     if not users:
-        await status_message.edit_text("❌ Пользователей в базе не найдено.")
+        await callback.message.edit_text(
+            "❌ Пользователей в базе не найдено.",
+            reply_markup=back_keyboard
+        )
         return
 
     # Списки для отчета
@@ -401,8 +418,8 @@ async def refresh_usernames_handler(message: types.Message, bot):
         )
 
         try:
-            # 1. Пытаемся получить участника чата
-            chat_member = await bot.get_chat_member(
+            # 1. Пытаемся получить участника чата через бота из колбека
+            chat_member = await callback.bot.get_chat_member(
                 chat_id=chat_id, user_id=telegram_id
             )
 
@@ -422,6 +439,7 @@ async def refresh_usernames_handler(message: types.Message, bot):
 
             # 3. Обновление username
             else:
+                # Обновляем только если отличается
                 was_updated = await update_user_username(
                     telegram_id=telegram_id, new_username=actual_username
                 )
@@ -440,9 +458,8 @@ async def refresh_usernames_handler(message: types.Message, bot):
                 deleted_access_error.append(
                     f"{display_name} (Чат: {chat_id}) - {str(e)[:30]}..."
                 )
-            except Exception as del_error:
+            except Exception:
                 pass
-                # logger.error(f"Не удалось удалить пользователя {telegram_id} после ошибки доступа: {del_error}")
 
         checked_count += 1
 
@@ -485,8 +502,9 @@ async def refresh_usernames_handler(message: types.Message, bot):
     else:
         report += "🗑 Недоступных пользователей не найдено."
 
-    # Отправка отчета (если слишком длинный, aiogram разобьет сам или обрежет, но мы ограничили списки)
-    await status_message.edit_text(report, parse_mode="HTML")
+    # Отправка отчета с кнопкой "Назад"
+    await callback.message.edit_text(report, parse_mode="HTML", reply_markup=back_keyboard)
+    await callback.answer()
 
 
 @admin_cntr.callback_query(F.data.startswith("remove_select_chat_"))
