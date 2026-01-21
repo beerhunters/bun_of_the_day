@@ -366,7 +366,9 @@ async def refresh_usernames_handler(message: types.Message, bot):
     Обновляет юзернеймы, удаляет пользователей без username и тех, кого бот не видит.
     """
     if message.chat.type != "private" or message.from_user.id != ADMIN:
-        await message.reply("Эта команда доступна только администратору в личных сообщениях!")
+        await message.reply(
+            "Эта команда доступна только администратору в личных сообщениях!"
+        )
         return
 
     status_message = await message.reply(
@@ -375,7 +377,7 @@ async def refresh_usernames_handler(message: types.Message, bot):
         "2. Удаление пользователей без username\n"
         "3. Удаление недоступных пользователей (ошибки доступа)\n\n"
         "⏳ Ждите отчета...",
-        parse_mode="HTML"
+        parse_mode="HTML",
     )
 
     users = await get_all_users()
@@ -394,11 +396,15 @@ async def refresh_usernames_handler(message: types.Message, bot):
         telegram_id = user_data["telegram_id"]
         chat_id = user_data["chat_id"]
         current_db_username = user_data["username"]
-        display_name = f"@{current_db_username}" if current_db_username else f"ID {telegram_id}"
+        display_name = (
+            f"@{current_db_username}" if current_db_username else f"ID {telegram_id}"
+        )
 
         try:
             # 1. Пытаемся получить участника чата
-            chat_member = await bot.get_chat_member(chat_id=chat_id, user_id=telegram_id)
+            chat_member = await bot.get_chat_member(
+                chat_id=chat_id, user_id=telegram_id
+            )
 
             # Проверяем статус (не покинул ли он чат)
             if chat_member.status in ["left", "kicked"]:
@@ -410,20 +416,30 @@ async def refresh_usernames_handler(message: types.Message, bot):
             if not actual_username:
                 # Если у пользователя нет юзернейма - удаляем
                 await delete_user_completely(telegram_id=telegram_id, chat_id=chat_id)
-                deleted_no_username.append(f"{display_name} (Имя: {chat_member.user.full_name})")
+                deleted_no_username.append(
+                    f"{display_name} (Имя: {chat_member.user.full_name})"
+                )
 
             # 3. Обновление username
             else:
-                was_updated = await update_user_username(telegram_id=telegram_id, new_username=actual_username)
+                was_updated = await update_user_username(
+                    telegram_id=telegram_id, new_username=actual_username
+                )
                 if was_updated:
-                    old_fmt = f"@{current_db_username}" if current_db_username else "Без ника"
-                    updated_users.append(f"ID {telegram_id}: {old_fmt} ➡️ @{actual_username}")
+                    old_fmt = (
+                        f"@{current_db_username}" if current_db_username else "Без ника"
+                    )
+                    updated_users.append(
+                        f"ID {telegram_id}: {old_fmt} ➡️ @{actual_username}"
+                    )
 
         except Exception as e:
             # 4. Обработка ошибки доступа (бот не видит юзера, юзер забанил бота, чат недоступен)
             try:
                 await delete_user_completely(telegram_id=telegram_id, chat_id=chat_id)
-                deleted_access_error.append(f"{display_name} (Чат: {chat_id}) - {str(e)[:30]}...")
+                deleted_access_error.append(
+                    f"{display_name} (Чат: {chat_id}) - {str(e)[:30]}..."
+                )
             except Exception as del_error:
                 pass
                 # logger.error(f"Не удалось удалить пользователя {telegram_id} после ошибки доступа: {del_error}")
@@ -460,7 +476,9 @@ async def refresh_usernames_handler(message: types.Message, bot):
 
     # Секция удаленных (ошибка доступа)
     if deleted_access_error:
-        report += f"🗑 <b>Удалено (ошибка доступа/вышли): {len(deleted_access_error)}</b>\n"
+        report += (
+            f"🗑 <b>Удалено (ошибка доступа/вышли): {len(deleted_access_error)}</b>\n"
+        )
         report += "\n".join(deleted_access_error[:10])
         if len(deleted_access_error) > 10:
             report += f"\n...и еще {len(deleted_access_error) - 10}"
